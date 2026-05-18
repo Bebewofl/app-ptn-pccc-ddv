@@ -225,7 +225,7 @@ export default function App() {
   const weekDays = useMemo(() => getWeekDays(), []);
 
   const categorizeDevice = (type) => {
-    const t = String(type).toLowerCase();
+    const t = String(type || '').toLowerCase();
     if (t.includes('tủ')) return 'Tủ trung tâm';
     if (t.includes('nhiệt')) return 'Đầu báo nhiệt';
     if (t.includes('khói')) return 'Đầu báo khói';
@@ -237,24 +237,27 @@ export default function App() {
   };
 
   const getItemStatus = (item) => {
-    if (!item.tests || item.tests.length === 0) return { text: 'Kho chờ', color: 'text-gray-500 bg-gray-100 border-gray-200' };
-    const runningTests = item.tests.filter(t => t.status === 'Đang chạy');
+    if (!item.tests || !Array.isArray(item.tests) || item.tests.length === 0) return { text: 'Kho chờ', color: 'text-gray-500 bg-gray-100 border-gray-200' };
+    const validTests = item.tests.filter(t => t);
+    if (validTests.length === 0) return { text: 'Kho chờ', color: 'text-gray-500 bg-gray-100 border-gray-200' };
+
+    const runningTests = validTests.filter(t => t.status === 'Đang chạy');
     if (runningTests.length > 0) {
        const stations = runningTests.map(t => t.equip).join(', ');
        return { text: `Đang chạy (${stations})`, color: 'text-blue-700 bg-blue-50 border-blue-200' };
     }
-    const waitingTests = item.tests.filter(t => t.status === 'Chờ chạy');
+    const waitingTests = validTests.filter(t => t.status === 'Chờ chạy');
     if (waitingTests.length > 0) {
        return { text: `Chờ ghép chạy`, color: 'text-amber-700 bg-amber-50 border-amber-200' };
     }
-    const allDone = item.tests.every(t => t.status === 'Xong');
+    const allDone = validTests.every(t => t.status === 'Xong');
     if (allDone) return { text: 'Hoàn thành', color: 'text-green-700 bg-green-50 border-green-200' };
     return { text: 'Đang xử lý', color: 'text-orange-700 bg-orange-50 border-orange-200' };
   };
 
   const uniqueClients = useMemo(() => {
     const clients = new Set(orders.map(o => o.client));
-    return Array.from(clients).sort((a, b) => a.localeCompare(b, 'vi'));
+    return Array.from(clients).sort((a, b) => (a || '').localeCompare(b || '', 'vi'));
   }, [orders]);
 
   const filteredOrders = useMemo(() => {
@@ -262,7 +265,7 @@ export default function App() {
       let match = true;
       if (orderSearchTerm) {
          const term = orderSearchTerm.toLowerCase();
-         if (!o.model.toLowerCase().includes(term) && !o.client.toLowerCase().includes(term) && !o.reqId.toLowerCase().includes(term)) {
+         if (!(o.model || '').toLowerCase().includes(term) && !(o.client || '').toLowerCase().includes(term) && !(o.reqId || '').toLowerCase().includes(term)) {
            match = false;
          }
       }
@@ -302,9 +305,14 @@ export default function App() {
       let totalTests = 0;
       let doneTests = 0;
       group.items.forEach(item => {
-        if (item.tests && item.tests.length > 0) {
-          totalTests += item.tests.length;
-          doneTests += item.tests.filter(t => t.status === 'Xong').length;
+        if (item.tests && Array.isArray(item.tests)) {
+          const valid = item.tests.filter(t => t);
+          if (valid.length > 0) {
+              totalTests += valid.length;
+              doneTests += valid.filter(t => t.status === 'Xong').length;
+          } else {
+              totalTests += 1;
+          }
         } else {
           totalTests += 1; 
         }
@@ -317,7 +325,7 @@ export default function App() {
   const duplicateCounts = useMemo(() => {
     const counts = {};
     samplesInStock.forEach(s => {
-      const key = `${String(s.client).trim().toLowerCase()}_${String(s.type).trim().toLowerCase()}_${String(s.model).trim().toLowerCase()}`;
+      const key = `${String(s.client || '').trim().toLowerCase()}_${String(s.type || '').trim().toLowerCase()}_${String(s.model || '').trim().toLowerCase()}`;
       counts[key] = (counts[key] || 0) + 1;
     });
     return counts;
@@ -329,14 +337,29 @@ export default function App() {
     return duplicateCounts[key] > 1; 
   };
 
+  const isDeviceCompatibleWithStation = (stationId, deviceType) => {
+    const cat = categorizeDevice(deviceType);
+    switch (stationId) {
+      case 'TNL-K': return cat === 'Đầu báo khói';
+      case 'TNL-N': return cat === 'Đầu báo nhiệt';
+      case 'TSO2': return cat !== 'Tủ trung tâm';
+      case 'PAS': return ['Chuông báo cháy', 'Đèn báo cháy', 'Còi đèn kết hợp'].includes(cat);
+      case 'MR': 
+      case 'TNA-N': 
+      case 'TNA-T': 
+      default: return true; 
+    }
+  };
+
   const exportToCSV = () => {
     let csvContent = "Mã Đơn,Khách Hàng,Loại Thiết Bị,Model,Số Lượng,Hạn Chót,Mức Độ Gấp,Trạng Thái,Trạm Máy Đang Chạy,KTV Phụ Trách\n";
     orders.forEach(order => {
        const statusInfo = getItemStatus(order);
-       const runningTest = order.tests?.find(t => t.status === 'Đang chạy') || {};
+       const validTests = (order.tests || []).filter(t => t);
+       const runningTest = validTests.find(t => t.status === 'Đang chạy') || {};
        const eqName = equipments.find(e => e.id === runningTest.equip)?.name || runningTest.equip || '';
        const ktv = runningTest.assignedUser || '';
-       const escapeCsv = (str) => `"${String(str).replace(/"/g, '""')}"`;
+       const escapeCsv = (str) => `"${String(str || '').replace(/"/g, '""')}"`;
 
        csvContent += `${escapeCsv(order.reqId)},${escapeCsv(order.client)},${escapeCsv(order.type)},${escapeCsv(order.model)},${order.sampleSize},${escapeCsv(order.deadline)},${escapeCsv(order.urgency)},${escapeCsv(statusInfo.text)},${escapeCsv(eqName)},${escapeCsv(ktv)}\n`;
     });
@@ -405,7 +428,7 @@ export default function App() {
          const sortedData = data.sort((a, b) => {
              if (a.id === 'TSO2') return -1;
              if (b.id === 'TSO2') return 1;
-             return a.name.localeCompare(b.name, 'vi');
+             return (a.name || '').localeCompare(b.name || '', 'vi');
          });
 
          setEquipments(sortedData);
@@ -664,8 +687,9 @@ export default function App() {
   const getTestsForStation = (stationId) => {
     const waiting = []; const running = []; const history = [];
     orders.forEach(order => {
-      if(!order.tests) return;
+      if(!order.tests || !Array.isArray(order.tests)) return;
       order.tests.forEach((test, index) => {
+        if (!test) return; // Bảo vệ khỏi dữ liệu lỗi
         if (test.equip === stationId) {
           const testData = { ...test, orderId: order.id, reqId: order.reqId, model: order.model, sampleSize: order.sampleSize, testIndex: index, client: order.client };
           if (test.status === 'Chờ chạy') waiting.push(testData);
@@ -711,7 +735,7 @@ export default function App() {
     if (!window.confirm("LƯU Ý: Gỡ thiết bị này ra khỏi trạm máy? Nó sẽ được trả về trạng thái Kho Chờ ban đầu.")) return;
     
     const targetOrder = orders.find(o => o.id === orderId);
-    if (!targetOrder) return;
+    if (!targetOrder || !Array.isArray(targetOrder.tests)) return;
 
     const updatedTests = [...targetOrder.tests];
     updatedTests.splice(testIndex, 1); 
@@ -876,6 +900,7 @@ export default function App() {
     const locs = {};
     orders.forEach(o => {
       o.tests?.forEach(t => {
+          if (!t) return; // Bảo vệ
           if (t.status === 'Đang chạy' && t.assignedUser && t.assignedUser !== 'Chưa phân công') {
             if (!locs[t.assignedUser]) locs[t.assignedUser] = new Set();
             const eqName = equipments.find(e => e.id === t.equip)?.name || t.equip;
@@ -900,7 +925,7 @@ export default function App() {
   const overdueGroups = groupedOrdersArr.filter(g => g.urgency === 'Quá hạn');
   const urgentGroupsOnly = groupedOrdersArr.filter(g => g.urgency === 'Gấp');
   const pendingGroups = groupedOrdersArr.filter(g => g.progress === 0);
-  const runningGroups = groupedOrdersArr.filter(g => g.items.some(item => item.tests && item.tests.some(t => t.status === 'Đang chạy')));
+  const runningGroups = groupedOrdersArr.filter(g => g.items.some(item => item.tests && item.tests.some(t => t && t.status === 'Đang chạy')));
 
   const daysInPrintMonth = new Date(printYear, printMonth, 0).getDate();
   const printDaysArray = Array.from({length: daysInPrintMonth}, (_, i) => {
@@ -2107,8 +2132,8 @@ export default function App() {
                               <div className="p-3 bg-amber-50/50 border-b border-amber-100">
                                  <h4 className="text-[10px] font-bold text-amber-800 mb-2 uppercase flex items-center gap-1"><Layers size={14}/> Danh sách chờ ghép chạy ({waiting.length})</h4>
                                  <div className="space-y-1.5 mb-3 max-h-32 overflow-y-auto">
-                                    {waiting.map((test, idx) => (
-                                       <div key={idx} className="bg-white border border-amber-200 px-2 py-1.5 rounded text-xs text-gray-800 font-medium flex justify-between items-center">
+                                    {waiting.map((test) => (
+                                       <div key={`${test.orderId}-${test.testIndex}`} className="bg-white border border-amber-200 px-2 py-1.5 rounded text-xs text-gray-800 font-medium flex justify-between items-center">
                                           <div className="flex flex-col">
                                              <span>{test.model}</span>
                                              <span className="text-gray-400 text-[10px]">{test.reqId}</span>
@@ -2172,8 +2197,8 @@ export default function App() {
                                     </div>
 
                                     <div className="mt-2 space-y-1 max-h-20 overflow-y-auto border-t border-gray-100 pt-2">
-                                       {running.map((test, idx) => (
-                                           <div key={idx} className="flex justify-between items-center text-[10px] bg-gray-50 px-2 py-1 rounded border border-gray-100">
+                                       {running.map((test) => (
+                                           <div key={`${test.orderId}-${test.testIndex}`} className="flex justify-between items-center text-[10px] bg-gray-50 px-2 py-1 rounded border border-gray-100">
                                                <span className="font-semibold text-gray-700 truncate pr-2">{test.model} ({test.reqId})</span>
                                                {userRole === 'admin' && (
                                                    <button onClick={() => handleRemoveTest(test.orderId, test.testIndex)} className="text-red-500 hover:text-red-700 hover:bg-red-100 p-0.5 rounded transition" title="Gỡ thiết bị khỏi lô">
@@ -2219,8 +2244,8 @@ export default function App() {
                            <div className="p-3 mt-auto border-t border-gray-100">
                              <h4 className="text-[10px] font-bold text-gray-500 mb-2 uppercase tracking-wide"><History size={12} className="inline mr-1 -mt-0.5"/> Lịch sử đã chạy ({history.length})</h4>
                              {history.length === 0 && <p className="text-[11px] text-gray-400 italic text-center py-1">Chưa có lịch sử.</p>}
-                             {history.slice(0, 3).map((test, idx) => ( 
-                               <div key={idx} className="bg-gray-50/50 p-2 rounded-lg border border-gray-100 mb-1 flex justify-between items-center opacity-80">
+                             {history.slice(0, 3).map((test) => ( 
+                               <div key={`${test.orderId}-${test.testIndex}`} className="bg-gray-50/50 p-2 rounded-lg border border-gray-100 mb-1 flex justify-between items-center opacity-80">
                                  <div>
                                    <div className="text-[9px] text-gray-400">{test.reqId}</div>
                                    <div className="text-[11px] font-medium text-gray-600">{test.model}</div>
@@ -2304,8 +2329,8 @@ export default function App() {
                         <div>
                           <h4 className="text-xs font-bold text-blue-700 mb-2 flex items-center gap-1 uppercase tracking-wide"><Activity size={14}/> Đang chạy ({running.length})</h4>
                           {running.length === 0 && <p className="text-[11px] text-gray-400 italic bg-gray-50 p-2 rounded text-center">Trạm đang trống.</p>}
-                          {running.map((test, idx) => (
-                            <div key={idx} className="bg-white p-3 rounded-lg border border-blue-200 mb-2 shadow-sm flex justify-between items-center border-l-4 border-l-blue-500 transition hover:shadow-md">
+                          {running.map((test) => (
+                            <div key={`${test.orderId}-${test.testIndex}`} className="bg-white p-3 rounded-lg border border-blue-200 mb-2 shadow-sm flex justify-between items-center border-l-4 border-l-blue-500 transition hover:shadow-md">
                               <div className="flex-1 pr-2">
                                 <div className="text-[10px] text-gray-500 font-bold mb-0.5">{test.reqId}</div>
                                 <div className="text-sm font-semibold text-gray-800 leading-tight">{test.model}</div>
@@ -2337,8 +2362,8 @@ export default function App() {
                         <div>
                           <h4 className="text-xs font-bold text-gray-500 mb-2 flex items-center gap-1 uppercase tracking-wide"><History size={14}/> Lịch sử đã chạy ({history.length})</h4>
                           {history.length === 0 && <p className="text-[11px] text-gray-400 italic text-center py-1">Chưa có lịch sử.</p>}
-                          {history.map((test, idx) => (
-                            <div key={idx} className="bg-gray-50/50 p-2 lg:p-3 rounded-lg border border-gray-100 mb-2 flex justify-between items-center opacity-80 hover:opacity-100 transition">
+                          {history.map((test) => (
+                            <div key={`${test.orderId}-${test.testIndex}`} className="bg-gray-50/50 p-2 lg:p-3 rounded-lg border border-gray-100 mb-2 flex justify-between items-center opacity-80 hover:opacity-100 transition">
                               <div>
                                 <div className="text-[9px] text-gray-400 line-through">{test.reqId}</div>
                                 <div className="text-xs font-medium text-gray-600">{test.model}</div>
