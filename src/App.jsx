@@ -64,13 +64,24 @@ import {
 } from 'lucide-react';
 
 // =========================================================================
-// 🚀 CẤU HÌNH FIREBASE
+// 🚀 CẤU HÌNH FIREBASE GỐC CỦA BẠN (KHÔNG ĐƯỢC THAY ĐỔI)
 // =========================================================================
-const firebaseConfig = JSON.parse(__firebase_config);
+const firebaseConfig = {
+  apiKey: "AIzaSyCoYYrj_cuqwm_5N0NQLUCEzKGh7DYheDE",
+  authDomain: "app-ptn-pccc.firebaseapp.com",
+  projectId: "app-ptn-pccc",
+  storageBucket: "app-ptn-pccc.firebasestorage.app",
+  messagingSenderId: "1070884929418",
+  appId: "1:1070884929418:web:aa64e2aac0b01b53821273"
+};
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appIdParam = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+// HÀM HELPER ĐỌC/GHI DỮ LIỆU CHUẨN
+const getCol = (colName) => collection(db, colName);
+const getDocument = (colName, docId) => doc(db, colName, docId);
 
 // =========================================================================
 // 🚀 HÀM HỖ TRỢ & THỜI GIAN
@@ -198,10 +209,6 @@ export default function App() {
   const [newStationName, setNewStationName] = useState(''); 
 
   const todayStr = getLocalYYYYMMDD(new Date());
-
-  // HÀM HELPER ĐỂ ĐẢM BẢO CHỈ LƯU VÀO VÙNG BẢO MẬT CỦA USER
-  const getUserDocRef = (colName, docId) => doc(db, 'artifacts', appIdParam, 'users', user.uid, colName, docId);
-  const getUserColRef = (colName) => collection(db, 'artifacts', appIdParam, 'users', user.uid, colName);
 
   const categorizeDevice = (type) => {
     const t = String(type || '').toLowerCase();
@@ -346,12 +353,12 @@ export default function App() {
       } else {
         const existing = keptSamples.get(key);
         existing.qty += Number(sample.qty || 1);
-        deletePromises.push(deleteDoc(getUserDocRef('samplesInStock', sample.id)));
+        deletePromises.push(deleteDoc(getDocument('samplesInStock', sample.id)));
       }
     });
 
     keptSamples.forEach(sample => {
-       updatePromises.push(updateDoc(getUserDocRef('samplesInStock', sample.id), { qty: sample.qty }));
+       updatePromises.push(updateDoc(getDocument('samplesInStock', sample.id), { qty: sample.qty }));
     });
 
     orders.forEach(order => {
@@ -361,12 +368,12 @@ export default function App() {
        } else {
           const existing = keptOrders.get(key);
           existing.sampleSize += Number(order.sampleSize || 1);
-          deletePromises.push(deleteDoc(getUserDocRef('orders', order.id)));
+          deletePromises.push(deleteDoc(getDocument('orders', order.id)));
        }
     });
 
     keptOrders.forEach(order => {
-       updatePromises.push(updateDoc(getUserDocRef('orders', order.id), { sampleSize: order.sampleSize }));
+       updatePromises.push(updateDoc(getDocument('orders', order.id), { sampleSize: order.sampleSize }));
     });
 
     if (deletePromises.length > 0 || updatePromises.length > 0) {
@@ -423,7 +430,7 @@ export default function App() {
     if (!user) return;
     const handleSnapshotError = (err) => { console.error("Firestore Snapshot Error:", err); };
 
-    const unsubPersonnel = onSnapshot(getUserColRef('personnel'), 
+    const unsubPersonnel = onSnapshot(getCol('personnel'), 
       (snapshot) => {
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         if (data.length === 0) seedInitialData('personnel'); 
@@ -432,7 +439,7 @@ export default function App() {
       handleSnapshotError
     );
 
-    const unsubEquipments = onSnapshot(getUserColRef('equipments'), 
+    const unsubEquipments = onSnapshot(getCol('equipments'), 
       (snapshot) => {
          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
          const coreEquipments = [
@@ -441,7 +448,7 @@ export default function App() {
            { id: 'TSO2', name: 'Tủ SO2' }, { id: 'PAS', name: 'Phòng âm thanh + ánh sáng' }
          ];
          coreEquipments.forEach(core => {
-             if (!data.some(eq => eq.id === core.id)) setDoc(getUserDocRef('equipments', core.id), core);
+             if (!data.some(eq => eq.id === core.id)) setDoc(getDocument('equipments', core.id), core);
          });
          const sortedData = data.sort((a, b) => {
              if (a.id === 'TSO2') return -1;
@@ -453,12 +460,12 @@ export default function App() {
       handleSnapshotError
     );
 
-    const unsubSamples = onSnapshot(getUserColRef('samplesInStock'), 
+    const unsubSamples = onSnapshot(getCol('samplesInStock'), 
       (snapshot) => setSamplesInStock(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
       handleSnapshotError
     );
     
-    const unsubOrders = onSnapshot(getUserColRef('orders'), 
+    const unsubOrders = onSnapshot(getCol('orders'), 
       (snapshot) => {
         setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         setIsLoading(false);
@@ -477,7 +484,7 @@ export default function App() {
           { id: 'NV1', name: 'Nguyễn Văn A', role: 'KTV Trưởng', shift: 'Hành Chính', status: 'Đang làm', timesheet: {} },
           { id: 'NV2', name: 'Trần Văn B', role: 'KTV', shift: 'Ca Ngày', status: 'Nghỉ phép', timesheet: {} },
         ];
-        for (const item of pData) await setDoc(getUserDocRef('personnel', item.id), item);
+        for (const item of pData) await setDoc(getDocument('personnel', item.id), item);
       }
 
       if (target === 'all' || target === 'equipments') {
@@ -486,7 +493,7 @@ export default function App() {
           { id: 'TNA-N', name: 'Tủ Nóng ẩm cỡ nhỏ' }, { id: 'TNA-T', name: 'Tủ Nóng ẩm cỡ trung' },
           { id: 'TSO2', name: 'Tủ SO2' }, { id: 'PAS', name: 'Phòng âm thanh + ánh sáng' }
         ];
-        for (const item of eqData) await setDoc(getUserDocRef('equipments', item.id), item);
+        for (const item of eqData) await setDoc(getDocument('equipments', item.id), item);
       }
     } catch (error) { console.error("Lỗi nạp dữ liệu:", error); }
   };
@@ -533,11 +540,11 @@ export default function App() {
           const timestamp = Date.now() + i;
 
           const newSample = { id: `K${timestamp}`, client, type, model, qty: parseInt(qty, 10) || 1, status: 'Kho chờ', date: new Date().toLocaleDateString('vi-VN') };
-          uploadPromises.push(setDoc(getUserDocRef('samplesInStock', newSample.id), newSample));
+          uploadPromises.push(setDoc(getDocument('samplesInStock', newSample.id), newSample));
 
           const orderItemId = `O${timestamp}`;
           const newOrder = { id: orderItemId, reqId: finalReqId, client, type, model, sampleSize: parseInt(qty, 10) || 1, deadline, urgency, tests: [] };
-          uploadPromises.push(setDoc(getUserDocRef('orders', orderItemId), newOrder));
+          uploadPromises.push(setDoc(getDocument('orders', orderItemId), newOrder));
         }
         await Promise.all(uploadPromises);
       } catch (error) { setErrorMessage("Lỗi xử lý file: " + error.message); } 
@@ -582,7 +589,7 @@ export default function App() {
           
           const timestamp = Date.now() + i;
           const id = `NV${timestamp}`;
-          uploadPromises.push(setDoc(getUserDocRef('personnel', id), { id, name, role, shift, status: 'Đang làm', timesheet: {} }));
+          uploadPromises.push(setDoc(getDocument('personnel', id), { id, name, role, shift, status: 'Đang làm', timesheet: {} }));
         }
         await Promise.all(uploadPromises);
         setShowAddPersonnel(false);
@@ -599,9 +606,9 @@ export default function App() {
     const finalDeadline = newOrderData.deadline ? new Date(newOrderData.deadline).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN');
     
     const newOrder = { id: `O${timestamp}`, reqId, client: newOrderData.client.trim(), type: newOrderData.type, model: newOrderData.model.trim(), sampleSize: parseInt(newOrderData.sampleSize) || 1, deadline: finalDeadline, urgency: newOrderData.urgency, tests: [] };
-    await setDoc(getUserDocRef('orders', newOrder.id), newOrder);
+    await setDoc(getDocument('orders', newOrder.id), newOrder);
     const newSample = { id: `K${timestamp}`, client: newOrder.client, type: newOrder.type, model: newOrder.model, qty: newOrder.sampleSize, status: 'Kho chờ', date: new Date().toLocaleDateString('vi-VN') };
-    await setDoc(getUserDocRef('samplesInStock', newSample.id), newSample);
+    await setDoc(getDocument('samplesInStock', newSample.id), newSample);
 
     setShowAddOrder(false);
     setNewOrderData({ client: '', type: 'Tủ trung tâm', model: '', sampleSize: 1, deadline: '', urgency: 'Mới' });
@@ -609,13 +616,13 @@ export default function App() {
 
   const handleSaveEditOrder = async (id) => {
     if (!user) return;
-    await updateDoc(getUserDocRef('orders', id), { model: editOrderData.model, sampleSize: parseInt(editOrderData.sampleSize) || 1 });
+    await updateDoc(getDocument('orders', id), { model: editOrderData.model, sampleSize: parseInt(editOrderData.sampleSize) || 1 });
     setEditingOrderId(null);
   };
 
   const handleDeleteOrder = async (id) => {
     if (!user) return;
-    await deleteDoc(getUserDocRef('orders', id));
+    await deleteDoc(getDocument('orders', id));
     setConfirmDeleteOrderId(null);
   };
 
@@ -634,7 +641,7 @@ export default function App() {
     const updatedTests = [...(targetOrder.tests || []), newTest];
 
     try {
-      await updateDoc(getUserDocRef('orders', targetOrder.id), { tests: updatedTests });
+      await updateDoc(getDocument('orders', targetOrder.id), { tests: updatedTests });
       setAssigningStation(null);
       setSelectedOrderIdToAssign('');
       setSelectedPersonnelToAssign('');
@@ -665,7 +672,7 @@ export default function App() {
     const updatedTests = [...targetOrder.tests];
     updatedTests[testIndex].status = 'Xong';
     updatedTests[testIndex].endTime = new Date().toISOString();
-    try { await updateDoc(getUserDocRef('orders', orderId), { tests: updatedTests }); } 
+    try { await updateDoc(getDocument('orders', orderId), { tests: updatedTests }); } 
     catch (err) { setErrorMessage("Lỗi cập nhật: " + err.message); }
   };
 
@@ -674,7 +681,7 @@ export default function App() {
     const group = groupedOrdersArr.find(g => g.groupId === groupId);
     if (!group) return;
     try {
-      const promises = group.items.map(item => updateDoc(getUserDocRef('orders', item.id), { urgency: newUrgency }));
+      const promises = group.items.map(item => updateDoc(getDocument('orders', item.id), { urgency: newUrgency }));
       await Promise.all(promises);
     } catch (err) { setErrorMessage("Lỗi cập nhật trạng thái đơn: " + err.message); }
   };
@@ -686,7 +693,7 @@ export default function App() {
     if (!targetOrder || !Array.isArray(targetOrder.tests)) return;
     const updatedTests = [...targetOrder.tests];
     updatedTests.splice(testIndex, 1); 
-    try { await updateDoc(getUserDocRef('orders', orderId), { tests: updatedTests }); } 
+    try { await updateDoc(getDocument('orders', orderId), { tests: updatedTests }); } 
     catch (err) { setErrorMessage("Lỗi khi gỡ thiết bị: " + err.message); }
   };
 
@@ -696,7 +703,7 @@ export default function App() {
     const targetPersonnel = personnel.find(p => p.id === id);
     const currentTimesheet = targetPersonnel?.timesheet || {};
     currentTimesheet[todayStr] = { ...currentTimesheet[todayStr], status: newStatus };
-    await updateDoc(getUserDocRef('personnel', id), { status: newStatus, timesheet: currentTimesheet });
+    await updateDoc(getDocument('personnel', id), { status: newStatus, timesheet: currentTimesheet });
   };
 
   const updatePersonnelNote = async (id, note) => {
@@ -704,38 +711,38 @@ export default function App() {
     const targetPersonnel = personnel.find(p => p.id === id);
     const currentTimesheet = targetPersonnel?.timesheet || {};
     currentTimesheet[todayStr] = { ...currentTimesheet[todayStr], note: note };
-    await updateDoc(getUserDocRef('personnel', id), { timesheet: currentTimesheet });
+    await updateDoc(getDocument('personnel', id), { timesheet: currentTimesheet });
   };
 
   const handleAddPersonnel = async () => {
     if (!user || !newPersonnel.name) return;
     const id = 'NV' + Date.now();
-    await setDoc(getUserDocRef('personnel', id), { id, name: newPersonnel.name, role: newPersonnel.role, shift: newPersonnel.shift, status: 'Đang làm', timesheet: {} });
+    await setDoc(getDocument('personnel', id), { id, name: newPersonnel.name, role: newPersonnel.role, shift: newPersonnel.shift, status: 'Đang làm', timesheet: {} });
     setShowAddPersonnel(false);
     setNewPersonnel({ name: '', role: 'KTV', shift: 'Hành Chính' });
   };
 
   const handleDeletePersonnel = async (id) => {
     if (!user) return;
-    await deleteDoc(getUserDocRef('personnel', id));
+    await deleteDoc(getDocument('personnel', id));
     setConfirmDeletePersonnelId(null);
   };
 
   const handleSaveEditPersonnel = async (id) => {
     if (!user) return;
-    await updateDoc(getUserDocRef('personnel', id), { name: editPersonnelData.name, role: editPersonnelData.role, shift: editPersonnelData.shift });
+    await updateDoc(getDocument('personnel', id), { name: editPersonnelData.name, role: editPersonnelData.role, shift: editPersonnelData.shift });
     setEditingPersonnelId(null);
   };
 
   const handleDeleteSample = async (id) => {
     if (!user) return;
-    await deleteDoc(getUserDocRef('samplesInStock', id));
+    await deleteDoc(getDocument('samplesInStock', id));
     setConfirmDeleteSampleId(null);
   };
 
   const handleSaveEditSample = async (id) => {
     if (!user) return;
-    await updateDoc(getUserDocRef('samplesInStock', id), { 
+    await updateDoc(getDocument('samplesInStock', id), { 
       client: editSampleData.client, type: editSampleData.type, model: editSampleData.model, qty: parseInt(editSampleData.qty, 10) || 1 
     });
     setEditingSampleId(null);
@@ -744,14 +751,14 @@ export default function App() {
   const handleAddStation = async () => {
     if (!newStationName.trim() || !user || userRole !== 'admin') return;
     const id = 'TR' + Date.now();
-    await setDoc(getUserDocRef('equipments', id), { id, name: newStationName.trim() });
+    await setDoc(getDocument('equipments', id), { id, name: newStationName.trim() });
     setNewStationName('');
   };
 
   const handleDeleteStation = async (id, name) => {
     if (userRole !== 'admin') return;
     if (!window.confirm(`Bạn có chắc muốn xóa trạm máy "${name}" không? \nCảnh báo: Các đơn hàng đang chạy trong trạm này có thể bị mất trạng thái hiển thị!`)) return;
-    await deleteDoc(getUserDocRef('equipments', id));
+    await deleteDoc(getDocument('equipments', id));
   };
 
   const toggleShift = () => setCurrentShift(prev => prev === 'Ngày' ? 'Đêm' : 'Ngày');
@@ -865,7 +872,7 @@ export default function App() {
                   ...(currentTimesheet[selectedAttendanceDate] || {}),
                   status: newStatus
               };
-              return updateDoc(getUserDocRef('personnel', p.id), { timesheet: currentTimesheet });
+              return updateDoc(getDocument('personnel', p.id), { timesheet: currentTimesheet });
           });
           
           await Promise.all(promises);
