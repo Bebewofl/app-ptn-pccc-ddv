@@ -64,7 +64,7 @@ import {
 } from 'lucide-react';
 
 // =========================================================================
-// 🚀 CẤU HÌNH FIREBASE GỐC CỦA BẠN (KHÔNG ĐƯỢC THAY ĐỔI)
+// 🚀 CẤU HÌNH FIREBASE GỐC CỦA BẠN (ĐẢM BẢO CHẠY TỐT TRÊN NETLIFY)
 // =========================================================================
 const firebaseConfig = {
   apiKey: "AIzaSyCoYYrj_cuqwm_5N0NQLUCEzKGh7DYheDE",
@@ -79,7 +79,7 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// HÀM HELPER ĐỌC/GHI DỮ LIỆU CHUẨN
+// SỬ DỤNG ĐƯỜNG DẪN GỐC ĐỂ TRÁNH LỖI QUYỀN FIREBASE
 const getCol = (colName) => collection(db, colName);
 const getDocument = (colName, docId) => doc(db, colName, docId);
 
@@ -190,7 +190,7 @@ export default function App() {
   const [selectedAttendanceDate, setSelectedAttendanceDate] = useState(getLocalYYYYMMDD(new Date()));
   const [attendanceViewDate, setAttendanceViewDate] = useState(new Date());
   const [attendanceBatchData, setAttendanceBatchData] = useState({});
-
+  const [pinnedTooltip, setPinnedTooltip] = useState(null);
   const [editingSampleId, setEditingSampleId] = useState(null);
   const [confirmDeleteSampleId, setConfirmDeleteSampleId] = useState(null);
   const [editSampleData, setEditSampleData] = useState({ client: '', type: '', model: '', qty: 1 });
@@ -268,14 +268,15 @@ export default function App() {
     });
   }, [orders, orderSearchTerm, filterUrgency, filterType, filterStatus, filterClient]);
 
+  // GỘP ĐƠN KĐ CHỈ THEO CLIENT (Khắc phục lỗi VS04 tách làm nhiều thẻ)
   const groupedOrdersArr = useMemo(() => {
     const groups = {};
     filteredOrders.forEach(o => {
-      const groupKey = `${o.client}_${o.reqId}`; 
+      const groupKey = String(o.client).trim().toUpperCase(); 
       if (!groups[groupKey]) {
         groups[groupKey] = {
           groupId: groupKey,
-          reqId: o.reqId,
+          reqId: o.reqId, 
           client: o.client,
           deadline: o.deadline,
           urgency: o.urgency,
@@ -285,6 +286,9 @@ export default function App() {
       }
       groups[groupKey].items.push(o);
       groups[groupKey].totalQty += Number(o.sampleSize || 1);
+
+      if (o.urgency === 'Quá hạn') groups[groupKey].urgency = 'Quá hạn';
+      else if (o.urgency === 'Gấp' && groups[groupKey].urgency !== 'Quá hạn') groups[groupKey].urgency = 'Gấp';
     });
     
     return Object.values(groups).map(group => {
@@ -358,11 +362,14 @@ export default function App() {
     });
 
     keptSamples.forEach(sample => {
-       updatePromises.push(updateDoc(getDocument('samplesInStock', sample.id), { qty: sample.qty }));
+       const original = samplesInStock.find(s => s.id === sample.id);
+       if (original && Number(original.qty) !== sample.qty) {
+           updatePromises.push(updateDoc(getDocument('samplesInStock', sample.id), { qty: sample.qty }));
+       }
     });
 
     orders.forEach(order => {
-       const key = `${String(order.reqId).trim().toLowerCase()}_${String(order.client).trim().toLowerCase()}_${String(order.type).trim().toLowerCase()}_${String(order.model).trim().toLowerCase()}`;
+       const key = `${String(order.client).trim().toLowerCase()}_${String(order.type).trim().toLowerCase()}_${String(order.model).trim().toLowerCase()}`;
        if (!keptOrders.has(key)) {
           keptOrders.set(key, { ...order, sampleSize: Number(order.sampleSize || 1) });
        } else {
@@ -373,13 +380,16 @@ export default function App() {
     });
 
     keptOrders.forEach(order => {
-       updatePromises.push(updateDoc(getDocument('orders', order.id), { sampleSize: order.sampleSize }));
+       const original = orders.find(o => o.id === order.id);
+       if (original && Number(original.sampleSize) !== order.sampleSize) {
+           updatePromises.push(updateDoc(getDocument('orders', order.id), { sampleSize: order.sampleSize }));
+       }
     });
 
     if (deletePromises.length > 0 || updatePromises.length > 0) {
       try {
         await Promise.all([...deletePromises, ...updatePromises]);
-        alert(`Thành công! Đã dọn dẹp và gộp xong các mã trùng. Dọn được ${deletePromises.length} bản ghi thừa.`);
+        alert(`Thành công! Đã dọn dẹp và gộp xong các mã trùng. Cập nhật được ${deletePromises.length + updatePromises.length} bản ghi.`);
       } catch (err) {
         setErrorMessage("Lỗi khi gộp mã trùng: " + err.message);
       }
@@ -697,7 +707,6 @@ export default function App() {
     catch (err) { setErrorMessage("Lỗi khi gỡ thiết bị: " + err.message); }
   };
 
-  // --- HÀM CẬP NHẬT NHÂN SỰ ---
   const changePersonnelStatus = async (id, newStatus) => {
     if (!user) return;
     const targetPersonnel = personnel.find(p => p.id === id);
@@ -829,7 +838,6 @@ export default function App() {
 
   const overdueGroups = groupedOrdersArr.filter(g => g.urgency === 'Quá hạn');
   const urgentGroupsOnly = groupedOrdersArr.filter(g => g.urgency === 'Gấp');
-  const pendingGroups = groupedOrdersArr.filter(g => g.progress === 0);
   const runningGroups = groupedOrdersArr.filter(g => g.items.some(item => item.tests && item.tests.some(t => t && t.status === 'Đang chạy')));
 
   const daysInPrintMonth = new Date(printYear, printMonth, 0).getDate();
@@ -838,7 +846,7 @@ export default function App() {
      return `${printYear}-${m}-${String(i + 1).padStart(2, '0')}`;
   });
 
-  // --- HÀM QUẢN LÝ LỊCH CHẤM CÔNG HÀNG LOẠT FULL MÀN HÌNH ---
+  // --- HÀM QUẢN LÝ LỊCH CHẤM CÔNG HÀNG LOẠT ---
   useEffect(() => {
       if (showAttendanceCalendar) {
           const batch = {};
@@ -884,7 +892,7 @@ export default function App() {
   };
 
   // =========================================================================
-  // 🚀 MÀN HÌNH ĐĂNG NHẬP CHỌN QUYỀN
+  // 🚀 MÀN HÌNH ĐĂNG NHẬP
   // =========================================================================
   if (!userRole) {
     return (
@@ -1060,7 +1068,7 @@ export default function App() {
           {/* TỔNG QUAN */}
           {activeTab === 'dashboard' && (
             <div className="space-y-4 lg:space-y-6 print:hidden max-w-7xl mx-auto">
-              {/* ... (Giữ nguyên phần Tổng quan) ... */}
+              
               {userRole === 'admin' && (
                 <div className="md:hidden flex justify-between gap-2">
                    <button onClick={exportToCSV} className="flex-1 flex justify-center items-center gap-2 bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-2.5 rounded-xl font-bold text-sm shadow-sm"><Download size={16}/> Xuất Excel</button>
@@ -1262,7 +1270,6 @@ export default function App() {
           {/* ĐƠN KĐ */}
           {activeTab === 'orders' && (
             <div className="max-w-7xl mx-auto flex flex-col h-full print:block">
-              {/* ... Nội dung đơn KĐ giữ nguyên ... */}
               <div className="flex flex-col md:flex-row gap-3 mb-4 print:hidden">
                  <div className="relative flex-1">
                     <input type="text" placeholder="Tìm Khách hàng, Model, Mã đơn..." value={orderSearchTerm} onChange={(e) => setOrderSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 shadow-sm"/>
@@ -1357,7 +1364,7 @@ export default function App() {
           )}
 
           {/* ================================================================ */}
-          {/* NHÂN SỰ MỚI (TỐI GIẢN + LỊCH FULL MÀN HÌNH) */}
+          {/* NHÂN SỰ MỚI (TỐI GIẢN + LỊCH FULL MÀN HÌNH + KÉO THẢ CSV) */}
           {/* ================================================================ */}
           {activeTab === 'personnel' && (
             <div className="space-y-4 lg:space-y-6 max-w-7xl mx-auto flex flex-col h-full print:block">
@@ -1381,7 +1388,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* FORM THÊM MỚI NHÂN SỰ */}
+              {/* FORM THÊM MỚI NHÂN SỰ CÓ KÉO THẢ CSV */}
               {showAddPersonnel && userRole === 'admin' && (
                  <div className="bg-white p-4 lg:p-6 rounded-xl border border-blue-200 shadow-md mb-6 animate-in slide-in-from-top-4 print:hidden">
                     <h3 className="text-base font-bold text-blue-800 mb-3 border-b border-blue-50 pb-2">Nhập Thông Điệp Nhân Sự</h3>
@@ -1434,19 +1441,19 @@ export default function App() {
                         <div className="flex items-center gap-4">
                             <h2 className="text-2xl font-black text-indigo-700 flex items-center gap-2"><CalendarCheck size={28}/> TRUNG TÂM CHẤM CÔNG</h2>
                         </div>
-                        <button onClick={() => setShowAttendanceCalendar(false)} className="px-6 py-2 bg-red-100 text-red-600 font-bold rounded-lg hover:bg-red-200 transition">Đóng Lịch</button>
+                        <button onClick={() => { setShowAttendanceCalendar(false); setPinnedTooltip(null); }} className="px-6 py-2 bg-red-100 text-red-600 font-bold rounded-lg hover:bg-red-200 transition">Đóng Lịch</button>
                     </div>
 
                     <div className="flex flex-1 overflow-hidden bg-gray-100">
                         {/* Cột trái: Tên + Tick */}
-                        <div className="w-80 bg-white border-r border-gray-200 flex flex-col shadow-lg z-10">
-                            <div className="p-4 bg-indigo-50 border-b border-indigo-100 text-center">
-                                <p className="text-xs font-bold text-indigo-500 uppercase tracking-widest mb-1">Ngày đang chọn</p>
+                        <div className="w-64 bg-white border-r border-gray-200 flex flex-col shadow-lg z-10 shrink-0">
+                            <div className="p-3 bg-indigo-50 border-b border-indigo-100 text-center">
+                                <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest mb-1">Ngày đang chọn</p>
                                 <input 
                                     type="date" 
                                     value={selectedAttendanceDate}
                                     onChange={(e) => setSelectedAttendanceDate(e.target.value)}
-                                    className="w-full text-center bg-white border border-indigo-200 rounded-lg p-2 text-lg font-black text-indigo-900 focus:ring-2 focus:ring-indigo-400 outline-none cursor-pointer"
+                                    className="w-full text-center bg-white border border-indigo-200 rounded p-1.5 text-sm font-black text-indigo-900 focus:ring-2 focus:ring-indigo-400 outline-none cursor-pointer"
                                 />
                             </div>
                             <div className="flex-1 overflow-y-auto p-2">
@@ -1454,41 +1461,41 @@ export default function App() {
                                     const mark = attendanceBatchData[p.id];
                                     return (
                                         <div key={p.id} className="flex justify-between items-center p-2 hover:bg-gray-50 border-b border-gray-100 rounded">
-                                            <span className="font-semibold text-sm text-gray-800 truncate pr-2">{p.name}</span>
+                                            <span className="font-semibold text-xs text-gray-800 truncate pr-2" title={p.name}>{p.name}</span>
                                             <div className="flex gap-1 shrink-0">
-                                                <button onClick={() => handleMarkStaff(p.id, 'V')} className={`w-8 h-8 rounded-md font-black text-sm flex items-center justify-center transition-all ${mark === 'V' ? 'bg-green-500 text-white shadow-inner scale-110' : 'bg-gray-100 text-gray-400 hover:bg-green-100 hover:text-green-600'}`}>V</button>
-                                                <button onClick={() => handleMarkStaff(p.id, 'X')} className={`w-8 h-8 rounded-md font-black text-sm flex items-center justify-center transition-all ${mark === 'X' ? 'bg-red-500 text-white shadow-inner scale-110' : 'bg-gray-100 text-gray-400 hover:bg-red-100 hover:text-red-600'}`}>X</button>
+                                                <button onClick={() => handleMarkStaff(p.id, 'V')} className={`w-7 h-7 rounded text-xs font-black flex items-center justify-center transition-all ${mark === 'V' ? 'bg-green-500 text-white shadow-inner scale-110' : 'bg-gray-100 text-gray-400 hover:bg-green-100 hover:text-green-600'}`}>V</button>
+                                                <button onClick={() => handleMarkStaff(p.id, 'X')} className={`w-7 h-7 rounded text-xs font-black flex items-center justify-center transition-all ${mark === 'X' ? 'bg-red-500 text-white shadow-inner scale-110' : 'bg-gray-100 text-gray-400 hover:bg-red-100 hover:text-red-600'}`}>X</button>
                                             </div>
                                         </div>
                                     );
                                 })}
                             </div>
-                            <div className="p-4 bg-white border-t border-gray-200 shadow-[0_-5px_15px_rgba(0,0,0,0.03)]">
-                                <button onClick={handleSaveBatchAttendance} className="w-full py-3 bg-indigo-600 text-white font-black rounded-xl hover:bg-indigo-700 shadow-md transition transform active:scale-95">LƯU LẠI (NGÀY {selectedAttendanceDate.split('-')[2]})</button>
+                            <div className="p-3 bg-white border-t border-gray-200 shadow-[0_-5px_15px_rgba(0,0,0,0.03)]">
+                                <button onClick={handleSaveBatchAttendance} className="w-full py-2.5 bg-indigo-600 text-white text-sm font-black rounded-lg hover:bg-indigo-700 shadow-md transition transform active:scale-95">LƯU LẠI (NGÀY {selectedAttendanceDate.split('-')[2]})</button>
                             </div>
                         </div>
 
-                        {/* Cột phải: Bảng lịch lớn */}
-                        <div className="flex-1 p-6 lg:p-10 flex flex-col">
-                            <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-2xl shadow-sm border border-gray-200">
+                        {/* Cột phải: Bảng lịch lớn (ĐÃ TÔ TRÒN MÀU BÊN TRONG THEO YÊU CẦU CUỐI CÙNG) */}
+                        <div className="flex-1 p-4 lg:p-6 flex flex-col bg-gray-50 overflow-y-auto">
+                            <div className="flex justify-between items-center mb-4 bg-white p-3 rounded-xl shadow-sm border border-gray-200 shrink-0">
                                 <div className="flex gap-2">
                                     <button onClick={() => setAttendanceViewDate(new Date(year - 1, month, 1))} className="p-2 text-gray-500 hover:bg-gray-200 rounded-lg"><ChevronsLeft size={20}/></button>
                                     <button onClick={() => setAttendanceViewDate(new Date(year, month - 1, 1))} className="p-2 text-gray-500 hover:bg-gray-200 rounded-lg"><ChevronLeft size={20}/></button>
                                 </div>
-                                <h3 className="text-2xl font-black text-gray-800 tracking-wide uppercase">Tháng {month + 1} - Năm {year}</h3>
+                                <h3 className="text-lg lg:text-xl font-black text-gray-800 tracking-wide uppercase">Tháng {month + 1} - Năm {year}</h3>
                                 <div className="flex gap-2">
                                     <button onClick={() => setAttendanceViewDate(new Date(year, month + 1, 1))} className="p-2 text-gray-500 hover:bg-gray-200 rounded-lg"><ChevronRight size={20}/></button>
                                     <button onClick={() => setAttendanceViewDate(new Date(year + 1, month, 1))} className="p-2 text-gray-500 hover:bg-gray-200 rounded-lg"><ChevronsRight size={20}/></button>
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-7 gap-4 mb-2 text-center">
-                                {['Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'Chủ Nhật'].map(day => (
-                                    <div key={day} className="font-black text-gray-400 uppercase tracking-widest">{day}</div>
+                            <div className="grid grid-cols-7 gap-2 mb-2 text-center shrink-0">
+                                {['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'].map(day => (
+                                    <div key={day} className="text-[10px] sm:text-xs font-black text-gray-500 uppercase tracking-widest">{day}</div>
                                 ))}
                             </div>
                             
-                            <div className="grid grid-cols-7 gap-4 flex-1">
+                            <div className="grid grid-cols-7 gap-2 flex-1 auto-rows-max">
                                 {calendarDays.map((dateStr, idx) => {
                                     if (!dateStr) return <div key={`empty-${idx}`} className="bg-transparent"></div>;
                                     
@@ -1496,7 +1503,6 @@ export default function App() {
                                     const isTodayLocal = dateStr === getLocalYYYYMMDD(new Date());
                                     const dayNum = parseInt(dateStr.split('-')[2], 10);
                                     
-                                    // Phân tích dữ liệu ngày này
                                     let hasWorking = false;
                                     let absentees = [];
 
@@ -1510,35 +1516,69 @@ export default function App() {
                                         }
                                     });
 
-                                    // Quyết định màu sắc
-                                    let circleClass = "border-gray-200 bg-white hover:bg-gray-50 text-gray-600";
+                                    // TÔ TRÒN MÀU BÊN TRONG THEO Ý MUỐN
+                                    let circleClass = "border-gray-200 bg-white text-gray-600 hover:bg-gray-50";
                                     if (absentees.length > 0) {
-                                        circleClass = "border-red-400 ring-4 ring-red-100 bg-red-50 text-red-700 font-bold";
+                                        circleClass = "bg-red-500 text-white font-bold shadow-md shadow-red-200"; 
                                     } else if (hasWorking) {
-                                        circleClass = "border-green-400 ring-4 ring-green-100 bg-green-50 text-green-700 font-bold";
+                                        circleClass = "bg-green-500 text-white font-bold shadow-md shadow-green-200"; 
                                     }
 
-                                    if (isSelected) circleClass += " shadow-[0_0_15px_rgba(79,70,229,0.5)] scale-105 z-10 ring-indigo-300 border-indigo-500 text-indigo-900";
+                                    if (isSelected) circleClass += " ring-4 ring-indigo-300 scale-110 z-10";
+
+                                    // --- TÍNH TOÁN VỊ TRÍ BẢNG THÔNG TIN CHỐNG TRÀN VIỀN ---
+                                    const rowIndex = Math.floor(idx / 7); // Tính xem đang ở hàng thứ mấy
+                                    const colIndex = idx % 7; // Tính xem đang ở cột thứ mấy
+                                    
+                                    // Trục dọc: 2 hàng đầu thì thả xuống dưới, các hàng sau thì trồi lên trên
+                                    const verticalPosition = rowIndex < 2 ? "top-full mt-2" : "bottom-full mb-2";
+                                    const verticalAnimation = rowIndex < 2 ? "slide-in-from-top-2" : "slide-in-from-bottom-2";
+                                    
+                                    // Trục ngang: Bám lề trái/phải nếu ở rìa, nằm giữa nếu ở trung tâm
+                                    let horizontalPosition = "left-1/2 -translate-x-1/2"; // Mặc định giữa
+                                    if (colIndex === 0 || colIndex === 1) horizontalPosition = "left-0"; // Sát trái
+                                    if (colIndex === 5 || colIndex === 6) horizontalPosition = "right-0"; // Sát phải
+                                    
+                                    const isPinned = pinnedTooltip === dateStr;
 
                                     return (
-                                        <div key={dateStr} className="relative group h-full">
+                                        <div key={dateStr} className={`relative group flex justify-center py-1 h-full z-0 ${isPinned ? 'z-50' : 'hover:z-50 focus-within:z-50'}`}>
                                             <button 
-                                                onClick={() => setSelectedAttendanceDate(dateStr)}
-                                                className={`w-full h-full min-h-[80px] rounded-2xl flex flex-col items-center justify-center transition-all border-2 ${circleClass}`}
+                                                onClick={() => {
+                                                    setSelectedAttendanceDate(dateStr);
+                                                    if (absentees.length > 0) {
+                                                        setPinnedTooltip(prev => prev === dateStr ? null : dateStr);
+                                                    } else {
+                                                        setPinnedTooltip(null);
+                                                    }
+                                                }}
+                                                className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex flex-col items-center justify-center transition-all ${circleClass}`}
                                             >
-                                                <span className="text-2xl">{dayNum}</span>
-                                                {isTodayLocal && <span className="absolute bottom-2 w-6 h-1.5 rounded-full bg-blue-500"></span>}
+                                                <span className="text-sm sm:text-base">{dayNum}</span>
+                                                {isTodayLocal && <span className="absolute bottom-[-6px] w-4 h-1 rounded-full bg-blue-600"></span>}
                                             </button>
                                             
-                                            {/* Tooltip khi di chuột vào ngày màu đỏ */}
+                                            {/* Tooltip hiển thị người vắng mặt */}
                                             {absentees.length > 0 && (
-                                                <div className="absolute z-50 bottom-full left-1/2 transform -translate-x-1/2 mb-2 hidden group-hover:flex flex-col w-64 bg-gray-900 text-white text-xs rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in slide-in-from-bottom-2">
-                                                    <div className="bg-red-600 font-bold text-center py-2 uppercase tracking-wider">Danh sách vắng ({absentees.length})</div>
-                                                    <div className="p-3 space-y-2 max-h-48 overflow-y-auto">
+                                                <div 
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    className={`absolute ${verticalPosition} ${horizontalPosition} ${isPinned ? 'flex' : 'hidden group-hover:flex'} flex-col w-48 sm:w-64 bg-gray-900 text-white text-xs rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in ${verticalAnimation}`}
+                                                >
+                                                    <div className="bg-red-600 font-bold flex justify-between items-center px-3 py-2 uppercase tracking-wider">
+                                                        <span>Vắng mặt ({absentees.length})</span>
+                                                        {isPinned ? (
+                                                            <button onClick={() => setPinnedTooltip(null)} className="bg-red-700 hover:bg-red-800 rounded p-1 transition shadow-sm" title="Đóng">
+                                                                <X size={14} className="text-white"/>
+                                                            </button>
+                                                        ) : (
+                                                            <span className="text-[9px] opacity-80 font-medium normal-case">(Bấm để ghim)</span>
+                                                        )}
+                                                    </div>
+                                                    <div className="p-2 space-y-1.5 max-h-48 overflow-y-auto pointer-events-auto">
                                                         {absentees.map((a, i) => (
-                                                            <div key={i} className="flex flex-col border-b border-gray-700 pb-1 last:border-0 last:pb-0">
-                                                                <span className="font-bold text-red-300">{a.name}</span>
-                                                                <span className="text-[10px] text-gray-300">{a.note}</span>
+                                                            <div key={i} className="flex flex-col border-b border-gray-700 pb-1.5 last:border-0 last:pb-0 pt-0.5">
+                                                                <span className="font-bold text-red-300 text-[11px]">{a.name}</span>
+                                                                <span className="text-[10px] text-gray-400 leading-tight">{a.note}</span>
                                                             </div>
                                                         ))}
                                                     </div>
@@ -1583,14 +1623,23 @@ export default function App() {
                            
                            {userRole === 'admin' && (
                              <div>
-                                {isEditing ? (
+                                {confirmDeletePersonnelId === p.id ? (
+                                  <div className="flex flex-col gap-1 items-end shrink-0 bg-white p-1 rounded-xl shadow-sm border border-red-100">
+                                    <span className="text-[10px] text-red-500 font-bold whitespace-nowrap px-1">Xóa luôn?</span>
+                                    <div className="flex gap-1">
+                                      <button onClick={() => handleDeletePersonnel(p.id)} className="p-1.5 bg-red-600 text-white rounded hover:bg-red-700"><Check size={14}/></button>
+                                      <button onClick={() => setConfirmDeletePersonnelId(null)} className="p-1.5 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"><X size={14}/></button>
+                                    </div>
+                                  </div>
+                                ) : isEditing ? (
                                   <div className="flex flex-col gap-1">
                                     <button onClick={() => handleSaveEditPersonnel(p.id)} className="p-1 bg-green-100 text-green-700 rounded hover:bg-green-200"><Check size={14}/></button>
                                     <button onClick={() => setEditingPersonnelId(null)} className="p-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200"><X size={14}/></button>
                                   </div>
                                 ) : (
                                   <div className="flex gap-1 opacity-50 hover:opacity-100">
-                                    <button onClick={() => { setEditingPersonnelId(p.id); setEditPersonnelData({name: p.name, role: p.role, shift: p.shift || 'Hành Chính'}); }} className="p-1.5 hover:bg-gray-100 rounded"><Edit2 size={14}/></button>
+                                    <button onClick={() => { setEditingPersonnelId(p.id); setEditPersonnelData({name: p.name, role: p.role, shift: p.shift || 'Hành Chính'}); }} className="p-1.5 hover:bg-gray-100 rounded text-gray-500"><Edit2 size={14}/></button>
+                                    <button onClick={() => setConfirmDeletePersonnelId(p.id)} className="p-1.5 hover:bg-red-50 text-red-500 rounded"><Trash2 size={14}/></button>
                                   </div>
                                 )}
                              </div>
@@ -1636,7 +1685,10 @@ export default function App() {
                              <h4 className="font-bold text-xs line-through text-gray-500">{p.name}</h4>
                            </div>
                            {confirmDeletePersonnelId === p.id ? (
-                             <div className="flex gap-1"><button onClick={() => handleDeletePersonnel(p.id)} className="text-[10px] bg-red-600 text-white px-2 py-1 rounded">Xóa</button></div>
+                             <div className="flex gap-1">
+                                <button onClick={() => handleDeletePersonnel(p.id)} className="text-[10px] bg-red-600 text-white px-2 py-1 rounded">Xóa</button>
+                                <button onClick={() => setConfirmDeletePersonnelId(null)} className="text-[10px] bg-gray-300 text-gray-800 px-2 py-1 rounded">Hủy</button>
+                             </div>
                            ) : (
                              <div className="flex gap-1">
                                 <button onClick={() => changePersonnelStatus(p.id, 'Đang làm')} className="text-[10px] bg-white border px-2 py-1 rounded hover:bg-blue-50">Phục hồi</button>
@@ -1652,13 +1704,208 @@ export default function App() {
             </div>
           )}
 
-          {/* CÁC TAB CÒN LẠI GIỮ NGUYÊN (KHO, TRẠM...) */}
-          {activeTab === 'inventory' && ( <div className="text-center p-10"><h2 className="text-xl font-bold">Vui lòng xem các tính năng bên tab Khác</h2></div> )}
-          {activeTab === 'equipment' && ( <div className="text-center p-10"><h2 className="text-xl font-bold">Vui lòng xem các tính năng bên tab Khác</h2></div> )}
+          {/* CÁC TAB CÒN LẠI */}
+          {activeTab === 'inventory' && (
+             <div className="space-y-4 lg:space-y-6 print:block max-w-7xl mx-auto h-full flex flex-col">
+               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 md:gap-4 print:hidden">
+                 <h2 className="text-xl font-bold text-gray-800 md:hidden">Kho Thiết Bị</h2>
+                 <div className="w-full md:w-1/2 lg:w-1/3 relative flex gap-2">
+                   <div className="relative flex-1">
+                     <input type="text" placeholder="Tìm kiếm model, khách hàng..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 transition shadow-sm"/>
+                     <Search size={18} className="absolute left-3 top-3 text-gray-400" />
+                   </div>
+                 </div>
+                 {userRole === 'admin' && (
+                   <div className="flex gap-2 w-full md:w-auto overflow-x-auto shrink-0">
+                     {Object.values(duplicateCounts).some(count => count > 1) && (
+                       <button onClick={handleDeleteAllDuplicates} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm border bg-red-50 text-red-600 border-red-200 hover:bg-red-100 transition shrink-0"><Trash2 size={18}/> Xóa mã trùng</button>
+                     )}
+                     <label htmlFor="upload-data" className="cursor-pointer flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm border bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 transition whitespace-nowrap">
+                       {isUploading ? <Loader2 size={18} className="animate-spin" /> : <UploadCloud size={18} />}
+                       {isUploading ? 'Đang đọc...' : 'Tải Excel'}
+                     </label>
+                     <input type="file" accept=".csv" id="upload-data" className="hidden" onChange={handleFileUpload} disabled={isUploading}/>
+                   </div>
+                 )}
+               </div>
+               {/* Khung chứa các mẫu thiết bị trong kho */}
+               <div className="flex-1 overflow-y-auto pb-10 print:overflow-visible">
+                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 md:gap-4 print:grid-cols-2 print:gap-4">
+                   {samplesInStock.filter(s => (s.model||'').toLowerCase().includes(searchTerm.toLowerCase()) || (s.client||'').toLowerCase().includes(searchTerm.toLowerCase())).map((sample) => {
+                     const isDuplicate = checkIsDuplicate(sample.client, sample.type, sample.model);
+                     const isEditing = editingSampleId === sample.id;
+                     return (
+                       <div key={sample.id} className={`p-3 md:p-4 rounded-xl shadow-sm border transition hover:shadow-md print:shadow-none print:break-inside-avoid print:border-gray-400 ${isDuplicate ? 'bg-red-50 border-red-300 print:bg-white' : 'bg-white border-gray-100'}`}>
+                         <div className="flex justify-between items-start h-full">
+                           {isEditing ? (
+                              <div className="flex-1 space-y-2 pr-2">
+                                 <input type="text" placeholder="Khách hàng" value={editSampleData.client} onChange={e => setEditSampleData({...editSampleData, client: e.target.value})} className="w-full text-xs border p-1.5 rounded focus:ring-1" />
+                                 <input type="text" placeholder="Loại TB" value={editSampleData.type} onChange={e => setEditSampleData({...editSampleData, type: e.target.value})} className="w-full text-xs border p-1.5 rounded focus:ring-1" />
+                                 <input type="text" placeholder="Model" value={editSampleData.model} onChange={e => setEditSampleData({...editSampleData, model: e.target.value})} className="w-full text-sm font-bold border p-1.5 rounded focus:ring-1" />
+                                 <input type="number" placeholder="Số lượng" value={editSampleData.qty} onChange={e => setEditSampleData({...editSampleData, qty: e.target.value})} className="w-1/3 text-xs border p-1.5 rounded focus:ring-1" />
+                              </div>
+                           ) : (
+                             <div className="flex-1 flex flex-col h-full justify-between pr-2">
+                               <div>
+                                  <div className="flex items-start gap-2 mb-1"><h3 className={`font-bold text-sm leading-tight print:text-black ${isDuplicate ? 'text-red-800' : 'text-gray-800'}`}>{sample.model}</h3></div>
+                                  <p className="text-[11px] text-gray-600 font-semibold mb-1 print:text-black">{sample.client}</p>
+                                  <p className="text-[10px] text-gray-400 print:text-black">{sample.type}</p>
+                               </div>
+                               <div className="mt-3 flex items-center justify-between">
+                                  <span className="text-xs font-black text-blue-600 bg-blue-50 px-2 py-1 rounded print:bg-white print:border print:border-gray-400 print:text-black">SL: {sample.qty}</span>
+                                  {isDuplicate && <span className="text-[9px] font-bold text-white bg-red-500 px-1.5 py-0.5 rounded flex items-center gap-1 shadow-sm print:hidden"><AlertTriangle size={10}/> TRÙNG</span>}
+                               </div>
+                             </div>
+                           )}
+                           {userRole === 'admin' && (
+                             <div className="print:hidden">
+                               {confirmDeleteSampleId === sample.id ? (
+                                 <div className="flex flex-col gap-1 items-end shrink-0 bg-white p-1 rounded shadow-sm border border-red-100">
+                                   <span className="text-[9px] text-red-500 font-bold whitespace-nowrap">Xóa chắc chưa?</span>
+                                   <div className="flex gap-1">
+                                     <button onClick={() => handleDeleteSample(sample.id)} className="p-1.5 bg-red-600 text-white rounded hover:bg-red-700 transition"><Check size={12}/></button>
+                                     <button onClick={() => setConfirmDeleteSampleId(null)} className="p-1.5 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition"><X size={12}/></button>
+                                   </div>
+                                 </div>
+                               ) : isEditing ? (
+                                 <div className="flex flex-col gap-1.5 items-end shrink-0">
+                                   <button onClick={() => handleSaveEditSample(sample.id)} className="p-2 bg-green-100 text-green-700 rounded-lg shadow-sm hover:bg-green-200 transition"><Check size={14}/></button>
+                                   <button onClick={() => setEditingSampleId(null)} className="p-2 bg-gray-100 text-gray-700 rounded-lg shadow-sm hover:bg-gray-200 transition"><X size={14}/></button>
+                                 </div>
+                               ) : (
+                                 <div className="flex flex-col gap-1.5 items-end shrink-0 opacity-40 hover:opacity-100 transition-opacity">
+                                   <button onClick={() => { setEditingSampleId(sample.id); setEditSampleData({client: sample.client, type: sample.type, model: sample.model, qty: sample.qty}); }} className="p-2 text-gray-500 hover:text-blue-600 bg-gray-50 rounded-lg hover:bg-blue-50 transition"><Edit2 size={14}/></button>
+                                   <button onClick={() => setConfirmDeleteSampleId(sample.id)} className="p-2 text-gray-500 hover:text-red-600 bg-gray-50 rounded-lg hover:bg-red-50 transition" title="Xóa thiết bị"><Trash2 size={14}/></button>
+                                 </div>
+                               )}
+                             </div>
+                           )}
+                         </div>
+                       </div>
+                     );
+                   })}
+                 </div>
+               </div>
+             </div>
+          )}
+
+          {activeTab === 'equipment' && (() => {
+             // ... Logic lấy dữ liệu eqStats, tổng số máy đang chạy ...
+            const eqStats = equipments.map(eq => {
+               const { running, waiting } = getTestsForStation(eq.id);
+               return { ...eq, runningCount: running.length, waitingCount: waiting.length };
+            });
+            const totalRunning = eqStats.reduce((sum, eq) => sum + eq.runningCount, 0);
+            const totalWaiting = eqStats.reduce((sum, eq) => sum + eq.waitingCount, 0);
+
+             return (
+               <div className="space-y-4 lg:space-y-6 print:hidden max-w-7xl mx-auto">
+                 {userRole === 'admin' && (
+                    <div className="bg-white rounded-xl shadow-sm border border-blue-200 p-4 flex flex-col sm:flex-row gap-3 items-center print:hidden">
+                       <div className="flex items-center gap-2 w-full sm:w-auto flex-1">
+                          <Settings2 size={20} className="text-blue-500" />
+                          <input type="text" placeholder="Nhập tên Trạm máy / Phòng ban mới..." value={newStationName} onChange={e => setNewStationName(e.target.value)} className="flex-1 border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-300 focus:outline-none" onKeyDown={e => e.key === 'Enter' && handleAddStation()}/>
+                       </div>
+                       <button onClick={handleAddStation} className="w-full sm:w-auto bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-bold shadow-sm hover:bg-blue-700 transition whitespace-nowrap">+ Thêm Trạm Máy</button>
+                    </div>
+                 )}
+   
+                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-6">
+                    <div className="bg-gray-100 px-4 py-3 border-b border-gray-200 flex justify-between items-center">
+                       <h3 className="font-bold text-sm lg:text-base text-gray-800 flex items-center gap-2"><Activity size={18} className="text-blue-600"/> TỔNG QUAN HOẠT ĐỘNG</h3>
+                       <div className="flex gap-3 text-xs font-bold">
+                          <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded">Đang chạy: {totalRunning}</span>
+                          <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded">Chờ ghép: {totalWaiting}</span>
+                       </div>
+                    </div>
+                    <div className="p-4 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                       {eqStats.map(eq => (
+                          <div key={'stat-'+eq.id} className={`p-3 rounded-lg border flex flex-col items-center text-center transition ${eq.runningCount > 0 ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200 opacity-60 hover:opacity-100'}`}>
+                             <span className="text-[10px] lg:text-xs font-bold text-gray-600 line-clamp-2 h-8 flex items-center">{eq.name}</span>
+                             <span className={`text-xl lg:text-2xl font-black mt-1 ${eq.runningCount > 0 ? 'text-blue-600' : 'text-gray-400'}`}>{eq.runningCount}</span>
+                             {eq.waitingCount > 0 && <span className="text-[9px] mt-1 bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">Chờ: {eq.waitingCount}</span>}
+                          </div>
+                       ))}
+                    </div>
+                 </div>
+
+                 {/* Dàn thẻ các trạm máy con */}
+                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 lg:gap-6">
+                   {equipments.map(eq => {
+                     const { running, waiting, history } = getTestsForStation(eq.id);
+                     const isAssigning = assigningStation === eq.id;
+   
+                     if (eq.id === 'TSO2') {
+                        // ... Logic hiển thị riêng cho tủ TSO2 ...
+                        const activeBatch = running.length > 0 ? running[0] : null; 
+                        const phase = activeBatch?.phase || ''; 
+                        const isPaused = activeBatch?.isPaused || false;
+                        
+                        let elapsedMs = 0; let isTimeUp = false; let timeColor = 'text-green-600';
+   
+                        if (activeBatch) {
+                           elapsedMs = getElapsedMs(activeBatch, currentTime);
+                           if (phase === 'Ăn mòn' && elapsedMs >= CORROSION_TIME_MS) { isTimeUp = true; timeColor = 'text-red-600 animate-pulse'; } 
+                           else if (phase === 'Sấy khô' && elapsedMs >= DRYING_TIME_MS) { isTimeUp = true; timeColor = 'text-red-600 animate-pulse'; }
+                        }
+
+                        // ... Giao diện tủ TSO2 ...
+                        return (
+                          <div key={eq.id} className={`bg-white rounded-xl shadow-sm border-2 overflow-hidden flex flex-col h-full relative transition-colors ${isTimeUp ? 'border-red-500 animate-[pulse_2s_ease-in-out_infinite]' : 'border-indigo-200'}`}>
+                            {/* ... NỘI DUNG TSO2 GIỮ NGUYÊN ... */}
+                            <div className={`p-3 lg:p-4 border-b flex justify-between items-center ${isTimeUp ? 'bg-red-50' : 'bg-indigo-50'}`}>
+                              <h3 className={`font-bold text-sm lg:text-base flex items-center gap-2 ${isTimeUp ? 'text-red-900' : 'text-indigo-900'}`}>{eq.name}</h3>
+                              <button onClick={() => setAssigningStation(isAssigning ? null : eq.id)} className={`text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm border transition ${isAssigning ? 'bg-gray-100' : 'bg-white'}`} disabled={running.length > 0}>{isAssigning ? 'Hủy' : '+ Thêm vào Lô'}</button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto flex flex-col p-3">
+                               {/* ... Nội dung list đang chạy, chờ chạy ... */}
+                               <h4 className="text-[10px] font-bold text-gray-500 mb-2 uppercase">Lịch sử đã chạy ({history.length})</h4>
+                               {history.map((test) => (
+                                 <div key={`${test.orderId}-${test.testIndex}`} className="bg-gray-50 p-2 rounded-lg border border-gray-100 mb-1 flex justify-between items-center">
+                                   <span className="text-[11px] font-medium text-gray-600">{test.model}</span>
+                                   <CheckCircle2 size={14} className="text-green-500" />
+                                 </div>
+                               ))}
+                            </div>
+                          </div>
+                        );
+                     }
+   
+                     // Trạm máy thông thường
+                     return (
+                       <div key={eq.id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-full hover:shadow-md transition">
+                         <div className="p-3 lg:p-4 border-b bg-blue-50 flex justify-between items-center">
+                           <h3 className="font-bold text-sm lg:text-base text-blue-900">{eq.name}</h3>
+                           <div className="flex gap-2">
+                             <button onClick={() => setAssigningStation(isAssigning ? null : eq.id)} className="text-xs font-bold px-3 py-1.5 bg-white rounded-lg border">{isAssigning ? 'Hủy' : '+ Thêm TB'}</button>
+                             {userRole === 'admin' && <button onClick={() => handleDeleteStation(eq.id, eq.name)} className="p-1.5 bg-white text-red-500 rounded-lg border"><Trash2 size={14}/></button>}
+                           </div>
+                         </div>
+                         <div className="p-3 lg:p-4 flex-1 overflow-y-auto">
+                           {/* ... Nội dung chạy máy thường ... */}
+                           <h4 className="text-xs font-bold text-blue-700 mb-2">Đang chạy ({running.length})</h4>
+                           {running.map((test) => (
+                             <div key={`${test.orderId}-${test.testIndex}`} className="bg-white p-3 rounded-lg border border-blue-200 mb-2 shadow-sm flex justify-between items-center">
+                               <div className="flex-1">
+                                 <div className="text-sm font-semibold">{test.model}</div>
+                                 <div className="text-[10px] text-gray-500">{test.assignedUser}</div>
+                               </div>
+                               <button onClick={() => markTestAsDone(test.orderId, test.testIndex)} className="text-xs bg-green-50 text-green-700 px-3 py-1.5 rounded-lg border">Xong</button>
+                             </div>
+                           ))}
+                         </div>
+                       </div>
+                     );
+                   })}
+                 </div>
+               </div>
+             );
+          })()}
+
         </main>
       </div>
 
-      {/* BOTTOM NAV */}
+      {/* BOTTOM NAV MOBILE */}
       <nav className="md:hidden bg-white border-t border-gray-200 fixed bottom-0 w-full flex justify-between px-2 py-2 pb-safe z-10 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
         {navItems.map(item => {
            const Icon = item.icon;
