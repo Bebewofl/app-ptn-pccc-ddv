@@ -183,13 +183,17 @@ export default function App() {
   const [editPersonnelData, setEditPersonnelData] = useState({ name: '', role: '', shift: '' });
   const [newPersonnel, setNewPersonnel] = useState({ name: '', role: 'KTV', shift: 'Hành Chính' });
   const [showAddPersonnel, setShowAddPersonnel] = useState(false);
-  const [editingNoteId, setEditingNoteId] = useState(null);
 
   // STATE CHO TÍNH NĂNG CHẤM CÔNG HÀNG LOẠT
   const [showAttendanceCalendar, setShowAttendanceCalendar] = useState(false);
+  const [attendanceMode, setAttendanceMode] = useState('date'); // 'date' hoặc 'person'
   const [selectedAttendanceDate, setSelectedAttendanceDate] = useState(getLocalYYYYMMDD(new Date()));
+  const [selectedAttendanceStaffId, setSelectedAttendanceStaffId] = useState(null);
   const [attendanceViewDate, setAttendanceViewDate] = useState(new Date());
-  const [attendanceBatchData, setAttendanceBatchData] = useState({});
+  
+  const [attendanceBatchData, setAttendanceBatchData] = useState({}); // Dùng cho mode 'date'
+  const [personBatchData, setPersonBatchData] = useState({}); // Dùng cho mode 'person'
+  
   const [pinnedTooltip, setPinnedTooltip] = useState(null);
   const [editingSampleId, setEditingSampleId] = useState(null);
   const [confirmDeleteSampleId, setConfirmDeleteSampleId] = useState(null);
@@ -846,9 +850,9 @@ export default function App() {
      return `${printYear}-${m}-${String(i + 1).padStart(2, '0')}`;
   });
 
-  // --- HÀM QUẢN LÝ LỊCH CHẤM CÔNG HÀNG LOẠT ---
+  // --- HÀM QUẢN LÝ LỊCH CHẤM CÔNG ---
   useEffect(() => {
-      if (showAttendanceCalendar) {
+      if (showAttendanceCalendar && attendanceMode === 'date') {
           const batch = {};
           activePersonnel.forEach(p => {
               const status = p.timesheet?.[selectedAttendanceDate]?.status;
@@ -857,14 +861,34 @@ export default function App() {
               else batch[p.id] = ''; 
           });
           setAttendanceBatchData(batch);
+      } else if (showAttendanceCalendar && attendanceMode === 'person') {
+          // Khi chuyển sang chế độ "Theo Người", đặt lại danh sách thay đổi tạm thời
+          setPersonBatchData({});
       }
-  }, [showAttendanceCalendar, selectedAttendanceDate, activePersonnel]);
+  }, [showAttendanceCalendar, selectedAttendanceDate, attendanceMode, selectedAttendanceStaffId, activePersonnel]);
 
   const handleMarkStaff = (staffId, mark) => {
       setAttendanceBatchData(prev => ({
           ...prev,
           [staffId]: prev[staffId] === mark ? '' : mark
       }));
+  };
+
+  const handleTogglePersonDay = (dateStr) => {
+      if (!selectedAttendanceStaffId) return;
+      const staff = activePersonnel.find(p => p.id === selectedAttendanceStaffId);
+      
+      const currentStatus = personBatchData[dateStr] !== undefined
+          ? personBatchData[dateStr]
+          : (staff?.timesheet?.[dateStr]?.status === 'Đang làm' || staff?.timesheet?.[dateStr]?.status === 'Làm việc' ? 'V' 
+             : (staff?.timesheet?.[dateStr]?.status === 'Nghỉ phép' || staff?.timesheet?.[dateStr]?.status === 'Nghỉ' || staff?.timesheet?.[dateStr]?.status === 'Vắng mặt' ? 'X' : ''));
+      
+      let nextStatus = '';
+      if (currentStatus === '') nextStatus = 'V'; // Click 1: Đi làm
+      else if (currentStatus === 'V') nextStatus = 'X'; // Click 2: Nghỉ
+      else if (currentStatus === 'X') nextStatus = ''; // Click 3: Bỏ chọn
+
+      setPersonBatchData(prev => ({ ...prev, [dateStr]: nextStatus }));
   };
 
   const handleSaveBatchAttendance = async () => {
@@ -885,8 +909,43 @@ export default function App() {
           
           await Promise.all(promises);
           alert("Đã lưu lịch chấm công thành công!");
-          setShowAttendanceCalendar(false); // Đóng lịch sau khi lưu thành công
+          setShowAttendanceCalendar(false);
           setPinnedTooltip(null);
+      } catch (error) {
+          console.error(error);
+          alert("Có lỗi xảy ra khi lưu chấm công!");
+      }
+  };
+
+  const handleSavePersonAttendance = async () => {
+      if (!user || !selectedAttendanceStaffId) return;
+      try {
+          const staff = activePersonnel.find(p => p.id === selectedAttendanceStaffId);
+          const currentTimesheet = { ...(staff.timesheet || {}) };
+          
+          let hasChanges = false;
+          Object.keys(personBatchData).forEach(dateStr => {
+              const mark = personBatchData[dateStr];
+              if (mark === 'V') {
+                  currentTimesheet[dateStr] = { ...(currentTimesheet[dateStr] || {}), status: 'Đang làm' };
+                  hasChanges = true;
+              } else if (mark === 'X') {
+                  currentTimesheet[dateStr] = { ...(currentTimesheet[dateStr] || {}), status: 'Nghỉ phép' };
+                  hasChanges = true;
+              } else if (mark === '') {
+                  delete currentTimesheet[dateStr];
+                  hasChanges = true;
+              }
+          });
+          
+          if (!hasChanges) {
+              alert("Không có thay đổi nào để lưu!");
+              return;
+          }
+
+          await updateDoc(getDocument('personnel', staff.id), { timesheet: currentTimesheet });
+          alert(`Đã lưu lịch chấm công cho ${staff.name}!`);
+          setPersonBatchData({});
       } catch (error) {
           console.error(error);
           alert("Có lỗi xảy ra khi lưu chấm công!");
@@ -1366,7 +1425,7 @@ export default function App() {
           )}
 
           {/* ================================================================ */}
-          {/* NHÂN SỰ MỚI (TỐI GIẢN + LỊCH FULL MÀN HÌNH + KÉO THẢ CSV) */}
+          {/* NHÂN SỰ MỚI (TỐI GIẢN + LỊCH FULL MÀN HÌNH + KÉO THẢ CSV + CHẤM THEO NGƯỜI) */}
           {/* ================================================================ */}
           {activeTab === 'personnel' && (
             <div className="space-y-4 lg:space-y-6 max-w-7xl mx-auto flex flex-col h-full print:block">
@@ -1382,7 +1441,10 @@ export default function App() {
                        <button onClick={() => setShowPrintModal(true)} className="flex items-center justify-center gap-2 bg-gray-800 text-white px-4 py-2.5 rounded-xl font-bold hover:bg-gray-900 transition shadow-sm">
                          <Printer size={18} /> <span className="hidden md:inline">In Bảng Chấm Công</span>
                        </button>
-                       <button onClick={() => setShowAttendanceCalendar(true)} className="flex items-center justify-center gap-2 bg-indigo-600 text-white px-4 py-2.5 rounded-xl font-bold hover:bg-indigo-700 transition shadow-sm">
+                       <button onClick={() => {
+                           setShowAttendanceCalendar(true);
+                           setAttendanceMode('date');
+                       }} className="flex items-center justify-center gap-2 bg-indigo-600 text-white px-4 py-2.5 rounded-xl font-bold hover:bg-indigo-700 transition shadow-sm">
                          <CalendarCheck size={18} /> <span className="hidden md:inline">Lịch chấm công</span>
                        </button>
                      </>
@@ -1422,7 +1484,7 @@ export default function App() {
                  </div>
               )}
 
-              {/* MODAL LỊCH CHẤM CÔNG HÀNG LOẠT (FULL MÀN HÌNH VỚI LOGIC V/X + HOVER ĐỎ/XANH) */}
+              {/* MODAL LỊCH CHẤM CÔNG HÀNG LOẠT (TÍCH HỢP CHẤM THEO NGÀY HOẶC THEO NGƯỜI) */}
               {showAttendanceCalendar && userRole === 'admin' && (() => {
                   const year = attendanceViewDate.getFullYear();
                   const month = attendanceViewDate.getMonth();
@@ -1447,34 +1509,72 @@ export default function App() {
                     </div>
 
                     <div className="flex flex-1 overflow-hidden bg-gray-100">
-                        {/* Cột trái: Tên + Tick */}
-                        <div className="w-56 md:w-64 lg:w-72 bg-white border-r border-gray-200 flex flex-col shadow-lg z-10 shrink-0 h-full">
-                            <div className="p-3 bg-indigo-50 border-b border-indigo-100 text-center">
-                                <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest mb-1">Ngày đang chọn</p>
-                                <input 
-                                    type="date" 
-                                    value={selectedAttendanceDate}
-                                    onChange={(e) => setSelectedAttendanceDate(e.target.value)}
-                                    className="w-full text-center bg-white border border-indigo-200 rounded p-1.5 text-sm font-black text-indigo-900 focus:ring-2 focus:ring-indigo-400 outline-none cursor-pointer"
-                                />
+                        {/* Cột trái: Tùy chọn Chế độ và Danh sách */}
+                        <div className="w-64 md:w-72 lg:w-80 bg-white border-r border-gray-200 flex flex-col shadow-lg z-10 shrink-0 h-full">
+                            
+                            {/* Toggle Switch Chế độ */}
+                            <div className="flex bg-gray-100 p-1 m-3 rounded-lg border border-gray-200 shrink-0">
+                                <button onClick={() => setAttendanceMode('date')} className={`flex-1 py-1.5 text-xs font-bold uppercase rounded-md transition-colors ${attendanceMode === 'date' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Theo Ngày</button>
+                                <button onClick={() => {
+                                    setAttendanceMode('person');
+                                    if (!selectedAttendanceStaffId && activePersonnel.length > 0) setSelectedAttendanceStaffId(activePersonnel[0].id);
+                                }} className={`flex-1 py-1.5 text-xs font-bold uppercase rounded-md transition-colors ${attendanceMode === 'person' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Theo Người</button>
                             </div>
-                            <div className="flex-1 overflow-y-auto p-2">
-                                {activePersonnel.map(p => {
-                                    const mark = attendanceBatchData[p.id];
-                                    return (
-                                        <div key={p.id} className="flex justify-between items-center p-2 hover:bg-gray-50 border-b border-gray-100 rounded gap-2">
-                                            <span className="font-semibold text-xs text-gray-800 truncate flex-1 min-w-0" title={p.name}>{p.name}</span>
-                                            <div className="flex gap-1 shrink-0">
-                                                <button onClick={() => handleMarkStaff(p.id, 'V')} className={`w-7 h-7 rounded text-xs font-black flex items-center justify-center transition-all ${mark === 'V' ? 'bg-green-500 text-white shadow-inner scale-110' : 'bg-gray-100 text-gray-400 hover:bg-green-100 hover:text-green-600'}`}>V</button>
-                                                <button onClick={() => handleMarkStaff(p.id, 'X')} className={`w-7 h-7 rounded text-xs font-black flex items-center justify-center transition-all ${mark === 'X' ? 'bg-red-500 text-white shadow-inner scale-110' : 'bg-gray-100 text-gray-400 hover:bg-red-100 hover:text-red-600'}`}>X</button>
-                                            </div>
+
+                            {attendanceMode === 'date' ? (
+                                <>
+                                    <div className="p-3 bg-indigo-50 border-y border-indigo-100 text-center shrink-0">
+                                        <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest mb-1">Ngày đang chọn</p>
+                                        <input 
+                                            type="date" 
+                                            value={selectedAttendanceDate}
+                                            onChange={(e) => setSelectedAttendanceDate(e.target.value)}
+                                            className="w-full text-center bg-white border border-indigo-200 rounded p-1.5 text-sm font-black text-indigo-900 focus:ring-2 focus:ring-indigo-400 outline-none cursor-pointer"
+                                        />
+                                    </div>
+                                    <div className="flex-1 overflow-y-auto p-2">
+                                        {activePersonnel.map(p => {
+                                            const mark = attendanceBatchData[p.id];
+                                            return (
+                                                <div key={p.id} className="flex justify-between items-center p-2 hover:bg-gray-50 border-b border-gray-100 rounded gap-2">
+                                                    <span className="font-semibold text-xs text-gray-800 truncate flex-1 min-w-0" title={p.name}>{p.name}</span>
+                                                    <div className="flex gap-1 shrink-0">
+                                                        <button onClick={() => handleMarkStaff(p.id, 'V')} className={`w-7 h-7 rounded text-xs font-black flex items-center justify-center transition-all ${mark === 'V' ? 'bg-green-500 text-white shadow-inner scale-110' : 'bg-gray-100 text-gray-400 hover:bg-green-100 hover:text-green-600'}`}>V</button>
+                                                        <button onClick={() => handleMarkStaff(p.id, 'X')} className={`w-7 h-7 rounded text-xs font-black flex items-center justify-center transition-all ${mark === 'X' ? 'bg-red-500 text-white shadow-inner scale-110' : 'bg-gray-100 text-gray-400 hover:bg-red-100 hover:text-red-600'}`}>X</button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    <div className="p-3 bg-white border-t border-gray-200 shadow-[0_-5px_15px_rgba(0,0,0,0.03)] mt-auto shrink-0">
+                                        <button onClick={handleSaveBatchAttendance} className="w-full py-2.5 bg-indigo-600 text-white text-sm font-black rounded-lg hover:bg-indigo-700 shadow-md transition transform active:scale-95">LƯU LẠI (NGÀY {selectedAttendanceDate.split('-')[2]})</button>
+                                    </div>
+                                </>
+                            ) : (
+                                <>
+                                    <div className="p-3 bg-indigo-50 border-y border-indigo-100 text-center shrink-0">
+                                        <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest mb-1">Nhân sự đang chọn</p>
+                                        <div className="text-sm font-black text-indigo-900 bg-white border border-indigo-200 rounded p-1.5 truncate">
+                                            {activePersonnel.find(p => p.id === selectedAttendanceStaffId)?.name || 'Chưa chọn'}
                                         </div>
-                                    );
-                                })}
-                            </div>
-                            <div className="p-3 bg-white border-t border-gray-200 shadow-[0_-5px_15px_rgba(0,0,0,0.03)] mt-auto shrink-0">
-                                <button onClick={handleSaveBatchAttendance} className="w-full py-2.5 bg-indigo-600 text-white text-sm font-black rounded-lg hover:bg-indigo-700 shadow-md transition transform active:scale-95">LƯU LẠI (NGÀY {selectedAttendanceDate.split('-')[2]})</button>
-                            </div>
+                                    </div>
+                                    <div className="flex-1 overflow-y-auto p-2">
+                                        {activePersonnel.map(p => (
+                                            <button 
+                                                key={p.id} 
+                                                onClick={() => { setSelectedAttendanceStaffId(p.id); setPersonBatchData({}); }}
+                                                className={`w-full text-left flex justify-between items-center p-3 mb-1 border rounded-lg transition-all ${selectedAttendanceStaffId === p.id ? 'bg-indigo-600 text-white border-indigo-700 shadow-md' : 'bg-white border-gray-100 hover:bg-gray-50 text-gray-700'}`}
+                                            >
+                                                <span className="font-semibold text-xs truncate flex-1">{p.name}</span>
+                                                {selectedAttendanceStaffId === p.id && <ChevronRight size={16} />}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div className="p-3 bg-white border-t border-gray-200 shadow-[0_-5px_15px_rgba(0,0,0,0.03)] mt-auto shrink-0">
+                                        <button onClick={handleSavePersonAttendance} className="w-full py-2.5 bg-indigo-600 text-white text-sm font-black rounded-lg hover:bg-indigo-700 shadow-md transition transform active:scale-95">LƯU CÁC NGÀY CHO NGƯỜI NÀY</button>
+                                    </div>
+                                </>
+                            )}
                         </div>
 
                         {/* Cột phải: Bảng lịch lớn */}
@@ -1501,95 +1601,116 @@ export default function App() {
                                 {calendarDays.map((dateStr, idx) => {
                                     if (!dateStr) return <div key={`empty-${idx}`} className="bg-transparent"></div>;
                                     
-                                    const isSelected = dateStr === selectedAttendanceDate;
                                     const isTodayLocal = dateStr === getLocalYYYYMMDD(new Date());
                                     const dayNum = parseInt(dateStr.split('-')[2], 10);
                                     
-                                    let hasWorking = false;
-                                    let absentees = [];
+                                    if (attendanceMode === 'date') {
+                                        // ------------------ HIỂN THỊ THEO NGÀY ------------------
+                                        const isSelected = dateStr === selectedAttendanceDate;
+                                        let hasWorking = false;
+                                        let absentees = [];
 
-                                    activePersonnel.forEach(p => {
-                                        const st = p.timesheet?.[dateStr]?.status;
-                                        const nt = p.timesheet?.[dateStr]?.note;
-                                        if (st === 'Nghỉ phép' || st === 'Nghỉ' || st === 'Vắng mặt') {
-                                            absentees.push({ name: p.name, note: nt || st });
-                                        } else if (st === 'Đang làm' || st === 'Làm việc') {
-                                            hasWorking = true;
+                                        activePersonnel.forEach(p => {
+                                            const st = p.timesheet?.[dateStr]?.status;
+                                            const nt = p.timesheet?.[dateStr]?.note;
+                                            if (st === 'Nghỉ phép' || st === 'Nghỉ' || st === 'Vắng mặt') {
+                                                absentees.push({ name: p.name, note: nt || st });
+                                            } else if (st === 'Đang làm' || st === 'Làm việc') {
+                                                hasWorking = true;
+                                            }
+                                        });
+
+                                        let circleClass = "border-gray-200 bg-white text-gray-600 hover:bg-gray-50";
+                                        if (absentees.length > 0) {
+                                            circleClass = "bg-red-500 text-white font-bold shadow-md shadow-red-200"; 
+                                        } else if (hasWorking) {
+                                            circleClass = "bg-green-500 text-white font-bold shadow-md shadow-green-200"; 
                                         }
-                                    });
 
-                                    // TÔ TRÒN MÀU BÊN TRONG THEO Ý MUỐN
-                                    let circleClass = "border-gray-200 bg-white text-gray-600 hover:bg-gray-50";
-                                    if (absentees.length > 0) {
-                                        circleClass = "bg-red-500 text-white font-bold shadow-md shadow-red-200"; 
-                                    } else if (hasWorking) {
-                                        circleClass = "bg-green-500 text-white font-bold shadow-md shadow-green-200"; 
-                                    }
+                                        if (isSelected) circleClass += " ring-4 ring-indigo-300 scale-110 z-10";
 
-                                    if (isSelected) circleClass += " ring-4 ring-indigo-300 scale-110 z-10";
+                                        const rowIndex = Math.floor(idx / 7); 
+                                        const colIndex = idx % 7; 
+                                        const isPinned = pinnedTooltip === dateStr;
+                                        const isTop = rowIndex <= 2;
+                                        const verticalAnimation = isTop ? "slide-in-from-top-2" : "slide-in-from-bottom-2";
+                                        
+                                        const tooltipStyle = {
+                                            zIndex: 9999,
+                                            ...(isTop ? { top: 'calc(100% + 8px)' } : { bottom: 'calc(100% + 8px)' }),
+                                            ...(colIndex <= 1 ? { left: '0' } : colIndex >= 5 ? { right: '0' } : { left: '50%', transform: 'translateX(-50%)' })
+                                        };
 
-                                    // --- TÍNH TOÁN VỊ TRÍ BẢNG THÔNG TIN CHỐNG TRÀN VIỀN BẰNG INLINE STYLE ---
-                                    const rowIndex = Math.floor(idx / 7); 
-                                    const colIndex = idx % 7; 
-                                    const isPinned = pinnedTooltip === dateStr;
-                                    
-                                    // Trục dọc: 3 hàng đầu rớt xuống, các hàng sau trồi lên
-                                    const isTop = rowIndex <= 2;
-                                    const verticalAnimation = isTop ? "slide-in-from-top-2" : "slide-in-from-bottom-2";
-                                    
-                                    // Khai báo style động để tránh lỗi Tailwind PurgeCSS không nhận diện được class
-                                    const tooltipStyle = {
-                                        zIndex: 9999,
-                                        ...(isTop ? { top: 'calc(100% + 8px)' } : { bottom: 'calc(100% + 8px)' }),
-                                        ...(colIndex <= 1 ? { left: '0' } : colIndex >= 5 ? { right: '0' } : { left: '50%', transform: 'translateX(-50%)' })
-                                    };
-
-                                    return (
-                                        <div key={dateStr} className={`relative group flex justify-center py-1 h-full z-0 ${isPinned ? 'z-50' : 'hover:z-50 focus-within:z-50'}`}>
-                                            <button 
-                                                onClick={() => {
-                                                    setSelectedAttendanceDate(dateStr);
-                                                    if (absentees.length > 0) {
-                                                        setPinnedTooltip(prev => prev === dateStr ? null : dateStr);
-                                                    } else {
-                                                        setPinnedTooltip(null);
-                                                    }
-                                                }}
-                                                className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex flex-col items-center justify-center transition-all ${circleClass}`}
-                                            >
-                                                <span className="text-sm sm:text-base">{dayNum}</span>
-                                                {isTodayLocal && <span className="absolute bottom-[-6px] w-4 h-1 rounded-full bg-blue-600"></span>}
-                                            </button>
-                                            
-                                            {/* Tooltip hiển thị người vắng mặt (Đã ghim vị trí an toàn) */}
-                                            {absentees.length > 0 && (
-                                                <div 
-                                                    onClick={(e) => e.stopPropagation()}
-                                                    style={tooltipStyle}
-                                                    className={`absolute ${isPinned ? 'flex' : 'hidden group-hover:flex'} flex-col w-56 sm:w-64 bg-gray-900 text-white text-xs rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in ${verticalAnimation}`}
+                                        return (
+                                            <div key={dateStr} className={`relative group flex justify-center py-1 h-full z-0 ${isPinned ? 'z-50' : 'hover:z-50 focus-within:z-50'}`}>
+                                                <button 
+                                                    onClick={() => {
+                                                        setSelectedAttendanceDate(dateStr);
+                                                        if (absentees.length > 0) {
+                                                            setPinnedTooltip(prev => prev === dateStr ? null : dateStr);
+                                                        } else {
+                                                            setPinnedTooltip(null);
+                                                        }
+                                                    }}
+                                                    className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex flex-col items-center justify-center transition-all ${circleClass}`}
                                                 >
-                                                    <div className="bg-red-600 font-bold flex justify-between items-center px-3 py-2 uppercase tracking-wider">
-                                                        <span>Vắng mặt ({absentees.length})</span>
-                                                        {isPinned ? (
-                                                            <button onClick={() => setPinnedTooltip(null)} className="bg-red-700 hover:bg-red-800 rounded p-1 transition shadow-sm" title="Đóng">
-                                                                <X size={14} className="text-white"/>
-                                                            </button>
-                                                        ) : (
-                                                            <span className="text-[9px] opacity-80 font-medium normal-case">(Bấm để ghim)</span>
-                                                        )}
+                                                    <span className="text-sm sm:text-base">{dayNum}</span>
+                                                    {isTodayLocal && <span className="absolute bottom-[-6px] w-4 h-1 rounded-full bg-blue-600"></span>}
+                                                </button>
+                                                
+                                                {absentees.length > 0 && (
+                                                    <div 
+                                                        onClick={(e) => e.stopPropagation()}
+                                                        style={tooltipStyle}
+                                                        className={`absolute ${isPinned ? 'flex' : 'hidden group-hover:flex'} flex-col w-56 sm:w-64 bg-gray-900 text-white text-xs rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in ${verticalAnimation}`}
+                                                    >
+                                                        <div className="bg-red-600 font-bold flex justify-between items-center px-3 py-2 uppercase tracking-wider">
+                                                            <span>Vắng mặt ({absentees.length})</span>
+                                                            {isPinned ? (
+                                                                <button onClick={() => setPinnedTooltip(null)} className="bg-red-700 hover:bg-red-800 rounded p-1 transition shadow-sm" title="Đóng">
+                                                                    <X size={14} className="text-white"/>
+                                                                </button>
+                                                            ) : (
+                                                                <span className="text-[9px] opacity-80 font-medium normal-case">(Bấm để ghim)</span>
+                                                            )}
+                                                        </div>
+                                                        <div className="p-2 space-y-1.5 max-h-48 overflow-y-auto pointer-events-auto">
+                                                            {absentees.map((a, i) => (
+                                                                <div key={i} className="flex flex-col border-b border-gray-700 pb-1.5 last:border-0 last:pb-0 pt-0.5">
+                                                                    <span className="font-bold text-red-300 text-[11px]">{a.name}</span>
+                                                                    <span className="text-[10px] text-gray-400 leading-tight">{a.note}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
                                                     </div>
-                                                    <div className="p-2 space-y-1.5 max-h-48 overflow-y-auto pointer-events-auto">
-                                                        {absentees.map((a, i) => (
-                                                            <div key={i} className="flex flex-col border-b border-gray-700 pb-1.5 last:border-0 last:pb-0 pt-0.5">
-                                                                <span className="font-bold text-red-300 text-[11px]">{a.name}</span>
-                                                                <span className="text-[10px] text-gray-400 leading-tight">{a.note}</span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
+                                                )}
+                                            </div>
+                                        );
+                                    } else {
+                                        // ------------------ HIỂN THỊ THEO NGƯỜI ------------------
+                                        const staff = activePersonnel.find(p => p.id === selectedAttendanceStaffId);
+                                        const mark = personBatchData[dateStr] !== undefined 
+                                            ? personBatchData[dateStr] 
+                                            : (staff?.timesheet?.[dateStr]?.status === 'Đang làm' || staff?.timesheet?.[dateStr]?.status === 'Làm việc' ? 'V' 
+                                               : (staff?.timesheet?.[dateStr]?.status === 'Nghỉ phép' || staff?.timesheet?.[dateStr]?.status === 'Nghỉ' || staff?.timesheet?.[dateStr]?.status === 'Vắng mặt' ? 'X' : ''));
+                                        
+                                        let circleClass = "border-gray-200 bg-white text-gray-600 hover:bg-gray-50";
+                                        if (mark === 'V') circleClass = "bg-green-500 text-white font-bold shadow-md shadow-green-200 scale-105";
+                                        if (mark === 'X') circleClass = "bg-red-500 text-white font-bold shadow-md shadow-red-200 scale-105";
+
+                                        return (
+                                            <div key={dateStr} className="relative flex justify-center py-1 h-full z-0 hover:z-10">
+                                                <button 
+                                                    onClick={() => handleTogglePersonDay(dateStr)}
+                                                    className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex flex-col items-center justify-center transition-all border-2 ${circleClass}`}
+                                                    title={`Bấm để chuyển: ${mark === '' ? 'Đi làm' : mark === 'V' ? 'Nghỉ' : 'Bỏ chọn'}`}
+                                                >
+                                                    <span className="text-sm sm:text-base">{dayNum}</span>
+                                                    {isTodayLocal && <span className={`absolute bottom-[-6px] w-4 h-1 rounded-full ${mark ? 'bg-white' : 'bg-blue-600'}`}></span>}
+                                                </button>
+                                            </div>
+                                        );
+                                    }
                                 })}
                             </div>
                         </div>
