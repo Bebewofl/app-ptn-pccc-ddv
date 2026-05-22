@@ -885,6 +885,8 @@ export default function App() {
           
           await Promise.all(promises);
           alert("Đã lưu lịch chấm công thành công!");
+          setShowAttendanceCalendar(false); // Đóng lịch sau khi lưu thành công
+          setPinnedTooltip(null);
       } catch (error) {
           console.error(error);
           alert("Có lỗi xảy ra khi lưu chấm công!");
@@ -1446,7 +1448,7 @@ export default function App() {
 
                     <div className="flex flex-1 overflow-hidden bg-gray-100">
                         {/* Cột trái: Tên + Tick */}
-                        <div className="w-64 bg-white border-r border-gray-200 flex flex-col shadow-lg z-10 shrink-0">
+                        <div className="w-56 md:w-64 lg:w-72 bg-white border-r border-gray-200 flex flex-col shadow-lg z-10 shrink-0 h-full">
                             <div className="p-3 bg-indigo-50 border-b border-indigo-100 text-center">
                                 <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest mb-1">Ngày đang chọn</p>
                                 <input 
@@ -1460,8 +1462,8 @@ export default function App() {
                                 {activePersonnel.map(p => {
                                     const mark = attendanceBatchData[p.id];
                                     return (
-                                        <div key={p.id} className="flex justify-between items-center p-2 hover:bg-gray-50 border-b border-gray-100 rounded">
-                                            <span className="font-semibold text-xs text-gray-800 truncate pr-2" title={p.name}>{p.name}</span>
+                                        <div key={p.id} className="flex justify-between items-center p-2 hover:bg-gray-50 border-b border-gray-100 rounded gap-2">
+                                            <span className="font-semibold text-xs text-gray-800 truncate flex-1 min-w-0" title={p.name}>{p.name}</span>
                                             <div className="flex gap-1 shrink-0">
                                                 <button onClick={() => handleMarkStaff(p.id, 'V')} className={`w-7 h-7 rounded text-xs font-black flex items-center justify-center transition-all ${mark === 'V' ? 'bg-green-500 text-white shadow-inner scale-110' : 'bg-gray-100 text-gray-400 hover:bg-green-100 hover:text-green-600'}`}>V</button>
                                                 <button onClick={() => handleMarkStaff(p.id, 'X')} className={`w-7 h-7 rounded text-xs font-black flex items-center justify-center transition-all ${mark === 'X' ? 'bg-red-500 text-white shadow-inner scale-110' : 'bg-gray-100 text-gray-400 hover:bg-red-100 hover:text-red-600'}`}>X</button>
@@ -1470,12 +1472,12 @@ export default function App() {
                                     );
                                 })}
                             </div>
-                            <div className="p-3 bg-white border-t border-gray-200 shadow-[0_-5px_15px_rgba(0,0,0,0.03)]">
+                            <div className="p-3 bg-white border-t border-gray-200 shadow-[0_-5px_15px_rgba(0,0,0,0.03)] mt-auto shrink-0">
                                 <button onClick={handleSaveBatchAttendance} className="w-full py-2.5 bg-indigo-600 text-white text-sm font-black rounded-lg hover:bg-indigo-700 shadow-md transition transform active:scale-95">LƯU LẠI (NGÀY {selectedAttendanceDate.split('-')[2]})</button>
                             </div>
                         </div>
 
-                        {/* Cột phải: Bảng lịch lớn (ĐÃ TÔ TRÒN MÀU BÊN TRONG THEO YÊU CẦU CUỐI CÙNG) */}
+                        {/* Cột phải: Bảng lịch lớn */}
                         <div className="flex-1 p-4 lg:p-6 flex flex-col bg-gray-50 overflow-y-auto">
                             <div className="flex justify-between items-center mb-4 bg-white p-3 rounded-xl shadow-sm border border-gray-200 shrink-0">
                                 <div className="flex gap-2">
@@ -1526,20 +1528,21 @@ export default function App() {
 
                                     if (isSelected) circleClass += " ring-4 ring-indigo-300 scale-110 z-10";
 
-                                    // --- TÍNH TOÁN VỊ TRÍ BẢNG THÔNG TIN CHỐNG TRÀN VIỀN ---
-                                    const rowIndex = Math.floor(idx / 7); // Tính xem đang ở hàng thứ mấy
-                                    const colIndex = idx % 7; // Tính xem đang ở cột thứ mấy
-                                    
-                                    // Trục dọc: 2 hàng đầu thì thả xuống dưới, các hàng sau thì trồi lên trên
-                                    const verticalPosition = rowIndex < 2 ? "top-full mt-2" : "bottom-full mb-2";
-                                    const verticalAnimation = rowIndex < 2 ? "slide-in-from-top-2" : "slide-in-from-bottom-2";
-                                    
-                                    // Trục ngang: Bám lề trái/phải nếu ở rìa, nằm giữa nếu ở trung tâm
-                                    let horizontalPosition = "left-1/2 -translate-x-1/2"; // Mặc định giữa
-                                    if (colIndex === 0 || colIndex === 1) horizontalPosition = "left-0"; // Sát trái
-                                    if (colIndex === 5 || colIndex === 6) horizontalPosition = "right-0"; // Sát phải
-                                    
+                                    // --- TÍNH TOÁN VỊ TRÍ BẢNG THÔNG TIN CHỐNG TRÀN VIỀN BẰNG INLINE STYLE ---
+                                    const rowIndex = Math.floor(idx / 7); 
+                                    const colIndex = idx % 7; 
                                     const isPinned = pinnedTooltip === dateStr;
+                                    
+                                    // Trục dọc: 3 hàng đầu rớt xuống, các hàng sau trồi lên
+                                    const isTop = rowIndex <= 2;
+                                    const verticalAnimation = isTop ? "slide-in-from-top-2" : "slide-in-from-bottom-2";
+                                    
+                                    // Khai báo style động để tránh lỗi Tailwind PurgeCSS không nhận diện được class
+                                    const tooltipStyle = {
+                                        zIndex: 9999,
+                                        ...(isTop ? { top: 'calc(100% + 8px)' } : { bottom: 'calc(100% + 8px)' }),
+                                        ...(colIndex <= 1 ? { left: '0' } : colIndex >= 5 ? { right: '0' } : { left: '50%', transform: 'translateX(-50%)' })
+                                    };
 
                                     return (
                                         <div key={dateStr} className={`relative group flex justify-center py-1 h-full z-0 ${isPinned ? 'z-50' : 'hover:z-50 focus-within:z-50'}`}>
@@ -1558,11 +1561,12 @@ export default function App() {
                                                 {isTodayLocal && <span className="absolute bottom-[-6px] w-4 h-1 rounded-full bg-blue-600"></span>}
                                             </button>
                                             
-                                            {/* Tooltip hiển thị người vắng mặt */}
+                                            {/* Tooltip hiển thị người vắng mặt (Đã ghim vị trí an toàn) */}
                                             {absentees.length > 0 && (
                                                 <div 
                                                     onClick={(e) => e.stopPropagation()}
-                                                    className={`absolute ${verticalPosition} ${horizontalPosition} ${isPinned ? 'flex' : 'hidden group-hover:flex'} flex-col w-48 sm:w-64 bg-gray-900 text-white text-xs rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in ${verticalAnimation}`}
+                                                    style={tooltipStyle}
+                                                    className={`absolute ${isPinned ? 'flex' : 'hidden group-hover:flex'} flex-col w-56 sm:w-64 bg-gray-900 text-white text-xs rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in ${verticalAnimation}`}
                                                 >
                                                     <div className="bg-red-600 font-bold flex justify-between items-center px-3 py-2 uppercase tracking-wider">
                                                         <span>Vắng mặt ({absentees.length})</span>
@@ -1704,7 +1708,7 @@ export default function App() {
             </div>
           )}
 
-          {/* CÁC TAB CÒN LẠI */}
+          {/* CÁC TAB CÒN LẠI GIỮ NGUYÊN (KHO, TRẠM...) */}
           {activeTab === 'inventory' && (
              <div className="space-y-4 lg:space-y-6 print:block max-w-7xl mx-auto h-full flex flex-col">
                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 md:gap-4 print:hidden">
