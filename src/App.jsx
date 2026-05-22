@@ -63,7 +63,7 @@ import {
 } from 'lucide-react';
 
 // =========================================================================
-// 🚀 CẤU HÌNH FIREBASE CỦA BẠN (ĐÃ FIX CỨNG)
+// 🚀 CẤU HÌNH FIREBASE
 // =========================================================================
 const firebaseConfig = {
   apiKey: "AIzaSyCoYYrj_cuqwm_5N0NQLUCEzKGh7DYheDE",
@@ -78,8 +78,8 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-const getCol = (colName) => collection(db, colName);
-const getDocument = (colName, docId) => doc(db, colName, docId);
+// Helper Firebase động cho môi trường Canvas/App
+const appIdParam = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 // =========================================================================
 // 🚀 HÀM HỖ TRỢ & THỜI GIAN
@@ -172,7 +172,6 @@ export default function App() {
   const [filterStatus, setFilterStatus] = useState('');
   const [filterClient, setFilterClient] = useState('');
 
-  // IN BẢNG CHẤM CÔNG THÁNG
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [printMonth, setPrintMonth] = useState(new Date().getMonth() + 1);
   const [printYear, setPrintYear] = useState(new Date().getFullYear());
@@ -223,6 +222,14 @@ export default function App() {
 
   const todayStr = getLocalYYYYMMDD(new Date());
   const weekDays = useMemo(() => getWeekDays(), []);
+
+  // HÀM HELPER ĐỂ ĐẢM BẢO CHỈ LƯU VÀO VÙNG BẢO MẬT CỦA USER
+  const getUserDocRef = (colName, docId) => {
+    return doc(db, 'artifacts', appIdParam, 'users', user.uid, colName, docId);
+  };
+  const getUserColRef = (colName) => {
+    return collection(db, 'artifacts', appIdParam, 'users', user.uid, colName);
+  };
 
   const categorizeDevice = (type) => {
     const t = String(type || '').toLowerCase();
@@ -298,7 +305,7 @@ export default function App() {
         };
       }
       groups[groupKey].items.push(o);
-      groups[groupKey].totalQty += (o.sampleSize || 1);
+      groups[groupKey].totalQty += Number(o.sampleSize || 1);
     });
     
     return Object.values(groups).map(group => {
@@ -351,6 +358,60 @@ export default function App() {
     }
   };
 
+  // --- HÀM XÓA & GỘP MÃ TRÙNG (Đã sửa lỗi phân quyền) ---
+  const handleDeleteAllDuplicates = async () => {
+    if (userRole !== 'admin' || !user) return;
+    if (!window.confirm("BẠN CÓ CHẮC CHẮN MƯỐN DỌN DẸP?\n\nHệ thống sẽ gộp số lượng các thiết bị giống hệt nhau (Khách hàng + Loại + Model) và xóa đi các dòng thừa.")) return;
+
+    const keptSamples = new Map();
+    const keptOrders = new Map();
+    const deletePromises = [];
+    const updatePromises = [];
+
+    // 1. Gộp số lượng bên Kho hàng
+    samplesInStock.forEach(sample => {
+      const key = `${String(sample.client).trim().toLowerCase()}_${String(sample.type).trim().toLowerCase()}_${String(sample.model).trim().toLowerCase()}`;
+      if (!keptSamples.has(key)) {
+        keptSamples.set(key, { ...sample, qty: Number(sample.qty || 1) });
+      } else {
+        const existing = keptSamples.get(key);
+        existing.qty += Number(sample.qty || 1);
+        deletePromises.push(deleteDoc(getUserDocRef('samplesInStock', sample.id)));
+      }
+    });
+
+    keptSamples.forEach(sample => {
+       updatePromises.push(updateDoc(getUserDocRef('samplesInStock', sample.id), { qty: sample.qty }));
+    });
+
+    // 2. Gộp số lượng bên Đơn KĐ (Nhóm cả theo reqId để không gộp nhầm 2 đơn khác nhau của cùng 1 KH)
+    orders.forEach(order => {
+       const key = `${String(order.reqId).trim().toLowerCase()}_${String(order.client).trim().toLowerCase()}_${String(order.type).trim().toLowerCase()}_${String(order.model).trim().toLowerCase()}`;
+       if (!keptOrders.has(key)) {
+          keptOrders.set(key, { ...order, sampleSize: Number(order.sampleSize || 1) });
+       } else {
+          const existing = keptOrders.get(key);
+          existing.sampleSize += Number(order.sampleSize || 1);
+          deletePromises.push(deleteDoc(getUserDocRef('orders', order.id)));
+       }
+    });
+
+    keptOrders.forEach(order => {
+       updatePromises.push(updateDoc(getUserDocRef('orders', order.id), { sampleSize: order.sampleSize }));
+    });
+
+    if (deletePromises.length > 0 || updatePromises.length > 0) {
+      try {
+        await Promise.all([...deletePromises, ...updatePromises]);
+        alert(`Thành công! Đã dọn dẹp và gộp xong các mã trùng. Dọn được ${deletePromises.length} bản ghi thừa.`);
+      } catch (err) {
+        setErrorMessage("Lỗi khi gộp mã trùng: " + err.message);
+      }
+    } else {
+        alert("Hiện tại dữ liệu đã sạch, không có bản ghi bị chia nhỏ!");
+    }
+  };
+
   const exportToCSV = () => {
     let csvContent = "Mã Đơn,Khách Hàng,Loại Thiết Bị,Model,Số Lượng,Hạn Chót,Mức Độ Gấp,Trạng Thái,Trạm Máy Đang Chạy,KTV Phụ Trách\n";
     orders.forEach(order => {
@@ -396,7 +457,7 @@ export default function App() {
         console.error("Firestore Snapshot Error:", err);
     };
 
-    const unsubPersonnel = onSnapshot(getCol('personnel'), 
+    const unsubPersonnel = onSnapshot(getUserColRef('personnel'), 
       (snapshot) => {
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         if (data.length === 0) seedInitialData('personnel'); 
@@ -405,7 +466,7 @@ export default function App() {
       handleSnapshotError
     );
 
-    const unsubEquipments = onSnapshot(getCol('equipments'), 
+    const unsubEquipments = onSnapshot(getUserColRef('equipments'), 
       (snapshot) => {
          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
          
@@ -421,7 +482,7 @@ export default function App() {
 
          coreEquipments.forEach(core => {
              if (!data.some(eq => eq.id === core.id)) {
-                 setDoc(getDocument('equipments', core.id), core);
+                 setDoc(getUserDocRef('equipments', core.id), core);
              }
          });
 
@@ -436,12 +497,12 @@ export default function App() {
       handleSnapshotError
     );
 
-    const unsubSamples = onSnapshot(getCol('samplesInStock'), 
+    const unsubSamples = onSnapshot(getUserColRef('samplesInStock'), 
       (snapshot) => setSamplesInStock(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
       handleSnapshotError
     );
     
-    const unsubOrders = onSnapshot(getCol('orders'), 
+    const unsubOrders = onSnapshot(getUserColRef('orders'), 
       (snapshot) => {
         setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         setIsLoading(false);
@@ -460,7 +521,7 @@ export default function App() {
           { id: 'NV1', name: 'Nguyễn Văn A', role: 'KTV Trưởng', shift: 'Hành Chính', status: 'Đang làm', timesheet: {} },
           { id: 'NV2', name: 'Trần Văn B', role: 'KTV', shift: 'Ca Ngày', status: 'Nghỉ phép', timesheet: {} },
         ];
-        for (const item of pData) await setDoc(getDocument('personnel', item.id), item);
+        for (const item of pData) await setDoc(getUserDocRef('personnel', item.id), item);
       }
 
       if (target === 'all' || target === 'equipments') {
@@ -473,7 +534,7 @@ export default function App() {
           { id: 'TSO2', name: 'Tủ SO2' },
           { id: 'PAS', name: 'Phòng âm thanh + ánh sáng' }
         ];
-        for (const item of eqData) await setDoc(getDocument('equipments', item.id), item);
+        for (const item of eqData) await setDoc(getUserDocRef('equipments', item.id), item);
       }
     } catch (error) { 
         console.error("Lỗi nạp dữ liệu:", error);
@@ -504,27 +565,36 @@ export default function App() {
         else if (headerRow.includes('\t')) separator = '\t';
         
         const uploadPromises = [];
+        
+        // HÀM MỚI: TỰ ĐỘNG GOM MÃ ĐƠN (ReqId) KHI UP FILE EXCEL CHUNG 1 KHÁCH HÀNG
+        const batchTimestamp = Date.now();
+        const clientReqIds = {}; 
 
         for (let i = 1; i < rows.length; i++) {
           const row = rows[i];
           const cols = row.split(separator).map(c => c.trim().replace(/^"|"$/g, ''));
           
           const client = cols[0] || 'Chưa có thông tin';
+          
+          // Gán cùng 1 mã đơn nếu cùng chung khách hàng trong file upload này
+          if (!clientReqIds[client]) {
+             clientReqIds[client] = cols[6] || `${client.substring(0, 3).toUpperCase()}-KĐ-${batchTimestamp.toString().slice(-4)}`;
+          }
+          const finalReqId = clientReqIds[client];
+
           const type = cols[1] || 'Thiết bị';
           const model = cols[2] || `Model (${i})`;
           const qty = cols[3] || '1';
           const deadline = cols[4] || new Date().toLocaleDateString('vi-VN');
           const urgency = cols[5] || 'Bình thường';
-          const reqIdFromCsv = cols[6]; 
           
           const timestamp = Date.now() + i;
-          const finalReqId = reqIdFromCsv || `${client.substring(0, 3).toUpperCase()}-KĐ-${timestamp.toString().slice(-4)}`;
 
           const newSample = { 
             id: `K${timestamp}`, client, type, model, 
             qty: parseInt(qty, 10) || 1, status: 'Kho chờ', date: new Date().toLocaleDateString('vi-VN') 
           };
-          uploadPromises.push(setDoc(getDocument('samplesInStock', newSample.id), newSample));
+          uploadPromises.push(setDoc(getUserDocRef('samplesInStock', newSample.id), newSample));
 
           const orderItemId = `O${timestamp}`;
           const newOrder = {
@@ -532,7 +602,7 @@ export default function App() {
             sampleSize: parseInt(qty, 10) || 1, deadline, urgency,
             tests: [] 
           };
-          uploadPromises.push(setDoc(getDocument('orders', orderItemId), newOrder));
+          uploadPromises.push(setDoc(getUserDocRef('orders', orderItemId), newOrder));
         }
         await Promise.all(uploadPromises);
       } catch (error) { 
@@ -589,7 +659,7 @@ export default function App() {
           const timestamp = Date.now() + i;
           const id = `NV${timestamp}`;
 
-          uploadPromises.push(setDoc(getDocument('personnel', id), { id, name, role, shift, status: 'Đang làm', timesheet: {} }));
+          uploadPromises.push(setDoc(getUserDocRef('personnel', id), { id, name, role, shift, status: 'Đang làm', timesheet: {} }));
         }
         await Promise.all(uploadPromises);
         setShowAddPersonnel(false);
@@ -622,7 +692,7 @@ export default function App() {
       tests: []
     };
 
-    await setDoc(getDocument('orders', newOrder.id), newOrder);
+    await setDoc(getUserDocRef('orders', newOrder.id), newOrder);
 
     const newSample = {
       id: `K${timestamp}`,
@@ -633,7 +703,7 @@ export default function App() {
       status: 'Kho chờ',
       date: new Date().toLocaleDateString('vi-VN')
     };
-    await setDoc(getDocument('samplesInStock', newSample.id), newSample);
+    await setDoc(getUserDocRef('samplesInStock', newSample.id), newSample);
 
     setShowAddOrder(false);
     setNewOrderData({ client: '', type: 'Tủ trung tâm', model: '', sampleSize: 1, deadline: '', urgency: 'Mới' });
@@ -641,7 +711,7 @@ export default function App() {
 
   const handleSaveEditOrder = async (id) => {
     if (!user) return;
-    await updateDoc(getDocument('orders', id), {
+    await updateDoc(getUserDocRef('orders', id), {
         model: editOrderData.model,
         sampleSize: parseInt(editOrderData.sampleSize) || 1
     });
@@ -650,7 +720,7 @@ export default function App() {
 
   const handleDeleteOrder = async (id) => {
     if (!user) return;
-    await deleteDoc(getDocument('orders', id));
+    await deleteDoc(getUserDocRef('orders', id));
     setConfirmDeleteOrderId(null);
   };
 
@@ -677,7 +747,7 @@ export default function App() {
     const updatedTests = [...(targetOrder.tests || []), newTest];
 
     try {
-      await updateDoc(getDocument('orders', targetOrder.id), { tests: updatedTests });
+      await updateDoc(getUserDocRef('orders', targetOrder.id), { tests: updatedTests });
       setAssigningStation(null);
       setSelectedOrderIdToAssign('');
       setSelectedPersonnelToAssign('');
@@ -689,7 +759,7 @@ export default function App() {
     orders.forEach(order => {
       if(!order.tests || !Array.isArray(order.tests)) return;
       order.tests.forEach((test, index) => {
-        if (!test) return; // Bảo vệ khỏi dữ liệu lỗi
+        if (!test) return; 
         if (test.equip === stationId) {
           const testData = { ...test, orderId: order.id, reqId: order.reqId, model: order.model, sampleSize: order.sampleSize, testIndex: index, client: order.client };
           if (test.status === 'Chờ chạy') waiting.push(testData);
@@ -711,7 +781,7 @@ export default function App() {
     updatedTests[testIndex].endTime = new Date().toISOString();
 
     try {
-      await updateDoc(getDocument('orders', orderId), { tests: updatedTests });
+      await updateDoc(getUserDocRef('orders', orderId), { tests: updatedTests });
     } catch (err) { setErrorMessage("Lỗi cập nhật: " + err.message); }
   };
 
@@ -722,7 +792,7 @@ export default function App() {
 
     try {
       const promises = group.items.map(item => {
-        return updateDoc(getDocument('orders', item.id), { urgency: newUrgency });
+        return updateDoc(getUserDocRef('orders', item.id), { urgency: newUrgency });
       });
       await Promise.all(promises);
     } catch (err) {
@@ -741,7 +811,7 @@ export default function App() {
     updatedTests.splice(testIndex, 1); 
 
     try {
-      await updateDoc(getDocument('orders', orderId), { tests: updatedTests });
+      await updateDoc(getUserDocRef('orders', orderId), { tests: updatedTests });
     } catch (err) {
       setErrorMessage("Lỗi khi gỡ thiết bị: " + err.message);
     }
@@ -753,7 +823,7 @@ export default function App() {
     const targetPersonnel = personnel.find(p => p.id === id);
     const currentTimesheet = targetPersonnel?.timesheet || {};
     currentTimesheet[todayStr] = { ...currentTimesheet[todayStr], status: newStatus };
-    await updateDoc(getDocument('personnel', id), { status: newStatus, timesheet: currentTimesheet });
+    await updateDoc(getUserDocRef('personnel', id), { status: newStatus, timesheet: currentTimesheet });
   };
 
   const updatePersonnelNote = async (id, note) => {
@@ -761,7 +831,7 @@ export default function App() {
     const targetPersonnel = personnel.find(p => p.id === id);
     const currentTimesheet = targetPersonnel?.timesheet || {};
     currentTimesheet[todayStr] = { ...currentTimesheet[todayStr], note: note };
-    await updateDoc(getDocument('personnel', id), { timesheet: currentTimesheet });
+    await updateDoc(getUserDocRef('personnel', id), { timesheet: currentTimesheet });
   };
 
   const openAttendanceModal = (staffId) => {
@@ -798,7 +868,7 @@ export default function App() {
       currentTimesheet[attendanceSelectedDateStr] = attendanceForm;
 
       try {
-          await updateDoc(getDocument('personnel', attendanceModalStaffId), { timesheet: currentTimesheet });
+          await updateDoc(getUserDocRef('personnel', attendanceModalStaffId), { timesheet: currentTimesheet });
           alert(`Đã lưu thành công dữ liệu chấm công ngày ${attendanceSelectedDateStr.split('-').reverse().join('/')} cho ${staff.name}!`);
       } catch(err) {
           setErrorMessage("Lỗi lưu chấm công: " + err.message);
@@ -808,32 +878,32 @@ export default function App() {
   const handleAddPersonnel = async () => {
     if (!user || !newPersonnel.name) return;
     const id = 'NV' + Date.now();
-    await setDoc(getDocument('personnel', id), { id, name: newPersonnel.name, role: newPersonnel.role, shift: newPersonnel.shift, status: 'Đang làm', timesheet: {} });
+    await setDoc(getUserDocRef('personnel', id), { id, name: newPersonnel.name, role: newPersonnel.role, shift: newPersonnel.shift, status: 'Đang làm', timesheet: {} });
     setShowAddPersonnel(false);
     setNewPersonnel({ name: '', role: 'KTV', shift: 'Hành Chính' });
   };
 
   const handleDeletePersonnel = async (id) => {
     if (!user) return;
-    await deleteDoc(getDocument('personnel', id));
+    await deleteDoc(getUserDocRef('personnel', id));
     setConfirmDeletePersonnelId(null);
   };
 
   const handleSaveEditPersonnel = async (id) => {
     if (!user) return;
-    await updateDoc(getDocument('personnel', id), { name: editPersonnelData.name, role: editPersonnelData.role, shift: editPersonnelData.shift });
+    await updateDoc(getUserDocRef('personnel', id), { name: editPersonnelData.name, role: editPersonnelData.role, shift: editPersonnelData.shift });
     setEditingPersonnelId(null);
   };
 
   const handleDeleteSample = async (id) => {
     if (!user) return;
-    await deleteDoc(getDocument('samplesInStock', id));
+    await deleteDoc(getUserDocRef('samplesInStock', id));
     setConfirmDeleteSampleId(null);
   };
 
   const handleSaveEditSample = async (id) => {
     if (!user) return;
-    await updateDoc(getDocument('samplesInStock', id), { 
+    await updateDoc(getUserDocRef('samplesInStock', id), { 
       client: editSampleData.client, 
       type: editSampleData.type, 
       model: editSampleData.model, 
@@ -845,14 +915,14 @@ export default function App() {
   const handleAddStation = async () => {
     if (!newStationName.trim() || !user || userRole !== 'admin') return;
     const id = 'TR' + Date.now();
-    await setDoc(getDocument('equipments', id), { id, name: newStationName.trim() });
+    await setDoc(getUserDocRef('equipments', id), { id, name: newStationName.trim() });
     setNewStationName('');
   };
 
   const handleDeleteStation = async (id, name) => {
     if (userRole !== 'admin') return;
     if (!window.confirm(`Bạn có chắc muốn xóa trạm máy "${name}" không? \nCảnh báo: Các đơn hàng đang chạy trong trạm này có thể bị mất trạng thái hiển thị!`)) return;
-    await deleteDoc(getDocument('equipments', id));
+    await deleteDoc(getUserDocRef('equipments', id));
   };
 
   const toggleShift = () => setCurrentShift(prev => prev === 'Ngày' ? 'Đêm' : 'Ngày');
@@ -867,7 +937,7 @@ export default function App() {
     }, 300); 
   };
 
-  // Tính toán dữ liệu Nhân sự hiển thị (Đưa ra khỏi Tab để dễ quản lý & tránh lỗi Scope)
+  // Tính toán dữ liệu Nhân sự hiển thị
   const activeStaff = useMemo(() => personnel
     .filter(p => p.status === 'Đang làm' || p.status === 'Làm việc')
     .sort((a, b) => {
@@ -900,7 +970,7 @@ export default function App() {
     const locs = {};
     orders.forEach(o => {
       o.tests?.forEach(t => {
-          if (!t) return; // Bảo vệ
+          if (!t) return; 
           if (t.status === 'Đang chạy' && t.assignedUser && t.assignedUser !== 'Chưa phân công') {
             if (!locs[t.assignedUser]) locs[t.assignedUser] = new Set();
             const eqName = equipments.find(e => e.id === t.equip)?.name || t.equip;
@@ -1683,7 +1753,6 @@ export default function App() {
                                </div>
                                <div className="p-2 space-y-2">
                                  {items.map(item => {
-                                   const isDuplicate = checkIsDuplicate(item.client, item.type, item.model);
                                    const statusInfo = getItemStatus(item);
                                    const isEditing = editingOrderId === item.id;
 
@@ -1708,7 +1777,6 @@ export default function App() {
                                             <div className="flex-1 pr-2">
                                               <div className="flex items-center gap-1">
                                                 <span className="text-xs font-semibold text-gray-800 print:text-black">{item.model}</span>
-                                                {isDuplicate && <AlertTriangle size={12} className="text-red-500 shrink-0 print:hidden"/>}
                                               </div>
                                               <span className="text-[10px] text-gray-500 print:text-black">SL: <b>{item.sampleSize}</b></span>
                                             </div>
@@ -1784,10 +1852,18 @@ export default function App() {
                   )}
                 </div>
                 {userRole === 'admin' && (
-                  <div className="shrink-0 w-full md:w-auto">
-                    <label htmlFor="upload-data" className="cursor-pointer flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm border bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 transition w-full md:w-auto">
+                  <div className="flex gap-2 w-full md:w-auto overflow-x-auto shrink-0">
+                    {Object.values(duplicateCounts).some(count => count > 1) && (
+                      <button 
+                        onClick={handleDeleteAllDuplicates}
+                        className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm border bg-red-50 text-red-600 border-red-200 hover:bg-red-100 transition shrink-0"
+                      >
+                        <Trash2 size={18}/> Xóa mã trùng
+                      </button>
+                    )}
+                    <label htmlFor="upload-data" className="cursor-pointer flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm border bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 transition whitespace-nowrap">
                       {isUploading ? <Loader2 size={18} className="animate-spin" /> : <UploadCloud size={18} />}
-                      {isUploading ? 'Đang đọc...' : 'Tải Excel (7 cột)'}
+                      {isUploading ? 'Đang đọc...' : 'Tải Excel'}
                     </label>
                     <input type="file" accept=".csv" id="upload-data" className="hidden" onChange={handleFileUpload} disabled={isUploading}/>
                   </div>
@@ -1985,7 +2061,7 @@ export default function App() {
                          });
 
                          const promises = Object.keys(updatesByOrder).map(orderId => {
-                             return updateDoc(getDocument('orders', orderId), { tests: updatesByOrder[orderId] });
+                             return updateDoc(getUserDocRef('orders', orderId), { tests: updatesByOrder[orderId] });
                          });
 
                          await Promise.all(promises);
@@ -2010,7 +2086,7 @@ export default function App() {
                          });
 
                          const promises = Object.keys(updatesByOrder).map(orderId => {
-                             return updateDoc(getDocument('orders', orderId), { tests: updatesByOrder[orderId] });
+                             return updateDoc(getUserDocRef('orders', orderId), { tests: updatesByOrder[orderId] });
                          });
                          await Promise.all(promises);
                      };
@@ -2038,7 +2114,7 @@ export default function App() {
                          });
 
                          const promises = Object.keys(updatesByOrder).map(orderId => {
-                             return updateDoc(getDocument('orders', orderId), { tests: updatesByOrder[orderId] });
+                             return updateDoc(getUserDocRef('orders', orderId), { tests: updatesByOrder[orderId] });
                          });
                          
                          await Promise.all(promises);
@@ -2066,7 +2142,7 @@ export default function App() {
                          });
 
                          const promises = Object.keys(updatesByOrder).map(orderId => {
-                             return updateDoc(getDocument('orders', orderId), { tests: updatesByOrder[orderId] });
+                             return updateDoc(getUserDocRef('orders', orderId), { tests: updatesByOrder[orderId] });
                          });
                          await Promise.all(promises);
                      };
@@ -2116,7 +2192,7 @@ export default function App() {
                                     if(!targetOrder) return;
                                     const newTest = { name: 'Kiểm định', status: 'Chờ chạy', equip: eq.id };
                                     const updatedTests = [...(targetOrder.tests || []), newTest];
-                                    await updateDoc(getDocument('orders', targetOrder.id), { tests: updatedTests });
+                                    await updateDoc(getUserDocRef('orders', targetOrder.id), { tests: updatedTests });
                                     setAssigningStation(null);
                                     setSelectedOrderIdToAssign('');
                                  }} 
