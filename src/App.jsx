@@ -336,7 +336,7 @@ export default function App() {
     switch (stationId) {
       case 'TNL-K': return cat === 'Đầu báo khói';
       case 'TNL-N': return cat === 'Đầu báo nhiệt';
-      case 'TSO2': return cat !== 'Tủ trung tâm';
+      case 'TSO2': return ['Đầu báo khói', 'Đầu báo nhiệt', 'Chuông báo cháy', 'Đèn báo cháy', 'Nút ấn báo cháy', 'Còi đèn kết hợp'].includes(cat);
       case 'PAS': return ['Chuông báo cháy', 'Đèn báo cháy', 'Còi đèn kết hợp'].includes(cat);
       case 'MR': 
       case 'TNA-N': 
@@ -850,43 +850,59 @@ export default function App() {
      return `${printYear}-${m}-${String(i + 1).padStart(2, '0')}`;
   });
 
-  // --- HÀM QUẢN LÝ LỊCH CHẤM CÔNG ---
+  // --- HÀM QUẢN LÝ LỊCH CHẤM CÔNG HÀNG LOẠT (MỚI NÂNG CẤP) ---
   useEffect(() => {
       if (showAttendanceCalendar && attendanceMode === 'date') {
           const batch = {};
           activePersonnel.forEach(p => {
               const status = p.timesheet?.[selectedAttendanceDate]?.status;
+              const note = p.timesheet?.[selectedAttendanceDate]?.note;
               if (status === 'Đang làm' || status === 'Làm việc') batch[p.id] = 'V';
               else if (status === 'Nghỉ phép' || status === 'Nghỉ' || status === 'Vắng mặt') batch[p.id] = 'X';
+              else if (status === 'Part-time') {
+                  const hm = note && note.match(/(\d+)/);
+                  batch[p.id] = `P-${hm ? hm[1] : '4'}`; // Trích xuất số giờ
+              }
               else batch[p.id] = ''; 
           });
           setAttendanceBatchData(batch);
       } else if (showAttendanceCalendar && attendanceMode === 'person') {
-          // Khi chuyển sang chế độ "Theo Người", đặt lại danh sách thay đổi tạm thời
           setPersonBatchData({});
       }
   }, [showAttendanceCalendar, selectedAttendanceDate, attendanceMode, selectedAttendanceStaffId, activePersonnel]);
 
   const handleMarkStaff = (staffId, mark) => {
-      setAttendanceBatchData(prev => ({
-          ...prev,
-          [staffId]: prev[staffId] === mark ? '' : mark
-      }));
+      setAttendanceBatchData(prev => {
+          const isSameMark = prev[staffId] === mark;
+          // Nếu bấm lại V hoặc X thì xóa. Nếu bấm Ca (P) thì kệ để có thể chọn select
+          const newMark = isSameMark && !mark.startsWith('P') ? '' : mark;
+          return { ...prev, [staffId]: newMark };
+      });
   };
 
   const handleTogglePersonDay = (dateStr) => {
       if (!selectedAttendanceStaffId) return;
       const staff = activePersonnel.find(p => p.id === selectedAttendanceStaffId);
       
-      const currentStatus = personBatchData[dateStr] !== undefined
-          ? personBatchData[dateStr]
-          : (staff?.timesheet?.[dateStr]?.status === 'Đang làm' || staff?.timesheet?.[dateStr]?.status === 'Làm việc' ? 'V' 
-             : (staff?.timesheet?.[dateStr]?.status === 'Nghỉ phép' || staff?.timesheet?.[dateStr]?.status === 'Nghỉ' || staff?.timesheet?.[dateStr]?.status === 'Vắng mặt' ? 'X' : ''));
+      let currentMark = personBatchData[dateStr];
+      if (currentMark === undefined) {
+          const st = staff?.timesheet?.[dateStr]?.status;
+          const nt = staff?.timesheet?.[dateStr]?.note;
+          if (st === 'Đang làm' || st === 'Làm việc') currentMark = 'V';
+          else if (st === 'Nghỉ phép' || st === 'Nghỉ' || st === 'Vắng mặt') currentMark = 'X';
+          else if (st === 'Part-time') {
+              const hm = nt && nt.match(/(\d+)/);
+              currentMark = `P-${hm ? hm[1] : '4'}`;
+          }
+          else currentMark = '';
+      }
       
+      // LOGIC BẤM LẦN 3 SANG MÀU VÀNG
       let nextStatus = '';
-      if (currentStatus === '') nextStatus = 'V'; // Click 1: Đi làm
-      else if (currentStatus === 'V') nextStatus = 'X'; // Click 2: Nghỉ
-      else if (currentStatus === 'X') nextStatus = ''; // Click 3: Bỏ chọn
+      if (currentMark === '') nextStatus = 'V';         // Lần 1: Xanh
+      else if (currentMark === 'V') nextStatus = 'X';   // Lần 2: Đỏ
+      else if (currentMark === 'X') nextStatus = 'P-4'; // Lần 3: Vàng (Mặc định 4 tiếng)
+      else if (currentMark.startsWith('P')) nextStatus = ''; // Lần 4: Xóa
 
       setPersonBatchData(prev => ({ ...prev, [dateStr]: nextStatus }));
   };
@@ -896,14 +912,28 @@ export default function App() {
       try {
           const promises = activePersonnel.map(p => {
               const mark = attendanceBatchData[p.id];
-              if (!mark) return Promise.resolve(); 
+              if (mark === undefined) return Promise.resolve(); // Bỏ qua nếu không có tương tác
               
-              let newStatus = mark === 'V' ? 'Đang làm' : 'Nghỉ phép';
+              let newStatus = '';
+              let newNote = p.timesheet?.[selectedAttendanceDate]?.note || '';
+              
+              if (mark === 'V') newStatus = 'Đang làm';
+              else if (mark === 'X') newStatus = 'Nghỉ phép';
+              else if (mark.startsWith('P')) {
+                  newStatus = 'Part-time';
+                  newNote = `Làm ${mark.split('-')[1]} tiếng`;
+              }
+              
               const currentTimesheet = { ...(p.timesheet || {}) };
-              currentTimesheet[selectedAttendanceDate] = {
-                  ...(currentTimesheet[selectedAttendanceDate] || {}),
-                  status: newStatus
-              };
+              if (newStatus === '') {
+                  delete currentTimesheet[selectedAttendanceDate];
+              } else {
+                  currentTimesheet[selectedAttendanceDate] = {
+                      ...(currentTimesheet[selectedAttendanceDate] || {}),
+                      status: newStatus,
+                      ...(mark.startsWith('P') && { note: newNote })
+                  };
+              }
               return updateDoc(getDocument('personnel', p.id), { timesheet: currentTimesheet });
           });
           
@@ -932,6 +962,10 @@ export default function App() {
               } else if (mark === 'X') {
                   currentTimesheet[dateStr] = { ...(currentTimesheet[dateStr] || {}), status: 'Nghỉ phép' };
                   hasChanges = true;
+              } else if (mark.startsWith('P')) {
+                  const hours = mark.split('-')[1] || '4';
+                  currentTimesheet[dateStr] = { ...(currentTimesheet[dateStr] || {}), status: 'Part-time', note: `Làm ${hours} tiếng` };
+                  hasChanges = true;
               } else if (mark === '') {
                   delete currentTimesheet[dateStr];
                   hasChanges = true;
@@ -944,7 +978,7 @@ export default function App() {
           }
 
           await updateDoc(getDocument('personnel', staff.id), { timesheet: currentTimesheet });
-          alert(`Đã lưu lịch chấm công cho ${staff.name}!`);
+          alert(`Đã lưu toàn bộ các ngày cho nhân sự ${staff.name}!`);
           setPersonBatchData({});
       } catch (error) {
           console.error(error);
@@ -1034,6 +1068,7 @@ export default function App() {
                         let mark = '';
                         if (status === 'Đang làm' || status === 'Làm việc') { mark = isOvertime ? 'TC' : 'X'; totalCong += 1; if (isOvertime) totalTC += 1; } 
                         else if (status === 'Nghỉ phép' || status === 'Nghỉ') { mark = 'P'; } 
+                        else if (status === 'Part-time') { mark = 'Ca'; totalCong += 1; }
                         else if (status === 'Vắng mặt' || status === 'Nghỉ không phép') { mark = 'V'; }
                         if (dayData?.note) notes.push(`Ngày ${dateStr.split('-')[2]}: ${dayData.note}`);
                         return <td key={dateStr} className={`border border-black p-1 text-center font-bold ${mark === 'TC' ? 'text-indigo-600' : (mark==='P' ? 'text-amber-600' : (mark==='V' ? 'text-red-600' : 'text-green-700'))}`}>{mark}</td>;
@@ -1056,7 +1091,7 @@ export default function App() {
             <div className="text-center"><p className="font-bold text-sm mb-16">Người lập bảng</p><p className="text-xs">(Ký và ghi rõ họ tên)</p></div>
             <div className="text-center"><p className="font-bold text-sm mb-16">Quản lý / Giám đốc</p><p className="text-xs">(Ký và ghi rõ họ tên)</p></div>
         </div>
-        <div className="mt-8 text-[9px] italic text-gray-600">* Ký hiệu: X (Đi làm/Hành chính) | TC (Tăng ca) | P (Nghỉ phép) | V (Vắng mặt)</div>
+        <div className="mt-8 text-[9px] italic text-gray-600">* Ký hiệu: X (Đi làm/Hành chính) | TC (Tăng ca) | Ca (Làm part-time) | P (Nghỉ phép) | V (Vắng mặt)</div>
     </div>
 
     {/* GIAO DIỆN CHÍNH CỦA APP */}
@@ -1129,7 +1164,7 @@ export default function App() {
           {/* TỔNG QUAN */}
           {activeTab === 'dashboard' && (
             <div className="space-y-4 lg:space-y-6 print:hidden max-w-7xl mx-auto">
-              
+              {/* ... (Giữ nguyên phần Tổng quan) ... */}
               {userRole === 'admin' && (
                 <div className="md:hidden flex justify-between gap-2">
                    <button onClick={exportToCSV} className="flex-1 flex justify-center items-center gap-2 bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-2.5 rounded-xl font-bold text-sm shadow-sm"><Download size={16}/> Xuất Excel</button>
@@ -1425,7 +1460,7 @@ export default function App() {
           )}
 
           {/* ================================================================ */}
-          {/* NHÂN SỰ MỚI (TỐI GIẢN + LỊCH FULL MÀN HÌNH + KÉO THẢ CSV + CHẤM THEO NGƯỜI) */}
+          {/* NHÂN SỰ MỚI (TỐI GIẢN + LỊCH FULL MÀN HÌNH + KÉO THẢ CSV + CHẤM THEO NGƯỜI VỚI V/X/CA) */}
           {/* ================================================================ */}
           {activeTab === 'personnel' && (
             <div className="space-y-4 lg:space-y-6 max-w-7xl mx-auto flex flex-col h-full print:block">
@@ -1484,7 +1519,7 @@ export default function App() {
                  </div>
               )}
 
-              {/* MODAL LỊCH CHẤM CÔNG HÀNG LOẠT (TÍCH HỢP CHẤM THEO NGÀY HOẶC THEO NGƯỜI) */}
+              {/* MODAL LỊCH CHẤM CÔNG HÀNG LOẠT */}
               {showAttendanceCalendar && userRole === 'admin' && (() => {
                   const year = attendanceViewDate.getFullYear();
                   const month = attendanceViewDate.getMonth();
@@ -1501,7 +1536,7 @@ export default function App() {
 
                   return (
                  <div className="fixed inset-0 bg-gray-900 z-50 flex flex-col w-[100vw] h-[100vh] overflow-hidden animate-in fade-in duration-200 print:hidden">
-                    <div className="bg-white flex justify-between items-center p-4 border-b shadow-sm">
+                    <div className="bg-white flex justify-between items-center p-4 border-b shadow-sm shrink-0">
                         <div className="flex items-center gap-4">
                             <h2 className="text-2xl font-black text-indigo-700 flex items-center gap-2"><CalendarCheck size={28}/> TRUNG TÂM CHẤM CÔNG</h2>
                         </div>
@@ -1534,13 +1569,24 @@ export default function App() {
                                     </div>
                                     <div className="flex-1 overflow-y-auto p-2">
                                         {activePersonnel.map(p => {
-                                            const mark = attendanceBatchData[p.id];
+                                            const mark = attendanceBatchData[p.id] || '';
                                             return (
                                                 <div key={p.id} className="flex justify-between items-center p-2 hover:bg-gray-50 border-b border-gray-100 rounded gap-2">
                                                     <span className="font-semibold text-xs text-gray-800 truncate flex-1 min-w-0" title={p.name}>{p.name}</span>
-                                                    <div className="flex gap-1 shrink-0">
+                                                    <div className="flex gap-1 shrink-0 items-center">
                                                         <button onClick={() => handleMarkStaff(p.id, 'V')} className={`w-7 h-7 rounded text-xs font-black flex items-center justify-center transition-all ${mark === 'V' ? 'bg-green-500 text-white shadow-inner scale-110' : 'bg-gray-100 text-gray-400 hover:bg-green-100 hover:text-green-600'}`}>V</button>
                                                         <button onClick={() => handleMarkStaff(p.id, 'X')} className={`w-7 h-7 rounded text-xs font-black flex items-center justify-center transition-all ${mark === 'X' ? 'bg-red-500 text-white shadow-inner scale-110' : 'bg-gray-100 text-gray-400 hover:bg-red-100 hover:text-red-600'}`}>X</button>
+                                                        <button onClick={() => handleMarkStaff(p.id, mark.startsWith('P') ? '' : 'P-4')} className={`w-7 h-7 rounded text-xs font-black flex items-center justify-center transition-all ${mark.startsWith('P') ? 'bg-yellow-400 text-black shadow-inner scale-110' : 'bg-gray-100 text-gray-400 hover:bg-yellow-100 hover:text-yellow-600'}`} title="Theo ca">Ca</button>
+                                                        
+                                                        {mark.startsWith('P') && (
+                                                            <select 
+                                                                value={mark.split('-')[1]} 
+                                                                onChange={(e) => handleMarkStaff(p.id, `P-${e.target.value}`)}
+                                                                className="w-10 h-7 text-xs border border-yellow-400 rounded outline-none bg-yellow-50 text-center font-bold text-yellow-800 appearance-none px-1"
+                                                            >
+                                                                {[1,2,3,4,5,6,7,8].map(h => <option key={h} value={h}>{h}h</option>)}
+                                                            </select>
+                                                        )}
                                                     </div>
                                                 </div>
                                             );
@@ -1571,7 +1617,7 @@ export default function App() {
                                         ))}
                                     </div>
                                     <div className="p-3 bg-white border-t border-gray-200 shadow-[0_-5px_15px_rgba(0,0,0,0.03)] mt-auto shrink-0">
-                                        <button onClick={handleSavePersonAttendance} className="w-full py-2.5 bg-indigo-600 text-white text-sm font-black rounded-lg hover:bg-indigo-700 shadow-md transition transform active:scale-95">LƯU CÁC NGÀY CHO NGƯỜI NÀY</button>
+                                        <button onClick={handleSavePersonAttendance} className="w-full py-2.5 bg-indigo-600 text-white text-sm font-black rounded-lg hover:bg-indigo-700 shadow-md transition transform active:scale-95">LƯU TOÀN BỘ CHO NGƯỜI NÀY</button>
                                     </div>
                                 </>
                             )}
@@ -1609,6 +1655,7 @@ export default function App() {
                                         const isSelected = dateStr === selectedAttendanceDate;
                                         let hasWorking = false;
                                         let absentees = [];
+                                        let partTimers = [];
 
                                         activePersonnel.forEach(p => {
                                             const st = p.timesheet?.[dateStr]?.status;
@@ -1617,6 +1664,9 @@ export default function App() {
                                                 absentees.push({ name: p.name, note: nt || st });
                                             } else if (st === 'Đang làm' || st === 'Làm việc') {
                                                 hasWorking = true;
+                                            } else if (st === 'Part-time') {
+                                                hasWorking = true;
+                                                partTimers.push({ name: p.name, note: nt || 'Làm theo ca' });
                                             }
                                         });
 
@@ -1629,6 +1679,7 @@ export default function App() {
 
                                         if (isSelected) circleClass += " ring-4 ring-indigo-300 scale-110 z-10";
 
+                                        // Tính toán vị trí tooltip chống tràn
                                         const rowIndex = Math.floor(idx / 7); 
                                         const colIndex = idx % 7; 
                                         const isPinned = pinnedTooltip === dateStr;
@@ -1646,42 +1697,61 @@ export default function App() {
                                                 <button 
                                                     onClick={() => {
                                                         setSelectedAttendanceDate(dateStr);
-                                                        if (absentees.length > 0) {
+                                                        if (absentees.length > 0 || partTimers.length > 0) {
                                                             setPinnedTooltip(prev => prev === dateStr ? null : dateStr);
                                                         } else {
                                                             setPinnedTooltip(null);
                                                         }
                                                     }}
-                                                    className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex flex-col items-center justify-center transition-all ${circleClass}`}
+                                                    className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex flex-col items-center justify-center transition-all border-2 ${circleClass}`}
                                                 >
                                                     <span className="text-sm sm:text-base">{dayNum}</span>
                                                     {isTodayLocal && <span className="absolute bottom-[-6px] w-4 h-1 rounded-full bg-blue-600"></span>}
                                                 </button>
                                                 
-                                                {absentees.length > 0 && (
+                                                {/* Tooltip hiển thị người vắng mặt hoặc part-time */}
+                                                {(absentees.length > 0 || partTimers.length > 0) && (
                                                     <div 
                                                         onClick={(e) => e.stopPropagation()}
                                                         style={tooltipStyle}
                                                         className={`absolute ${isPinned ? 'flex' : 'hidden group-hover:flex'} flex-col w-56 sm:w-64 bg-gray-900 text-white text-xs rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in ${verticalAnimation}`}
                                                     >
-                                                        <div className="bg-red-600 font-bold flex justify-between items-center px-3 py-2 uppercase tracking-wider">
-                                                            <span>Vắng mặt ({absentees.length})</span>
-                                                            {isPinned ? (
-                                                                <button onClick={() => setPinnedTooltip(null)} className="bg-red-700 hover:bg-red-800 rounded p-1 transition shadow-sm" title="Đóng">
-                                                                    <X size={14} className="text-white"/>
-                                                                </button>
-                                                            ) : (
-                                                                <span className="text-[9px] opacity-80 font-medium normal-case">(Bấm để ghim)</span>
-                                                            )}
-                                                        </div>
-                                                        <div className="p-2 space-y-1.5 max-h-48 overflow-y-auto pointer-events-auto">
-                                                            {absentees.map((a, i) => (
-                                                                <div key={i} className="flex flex-col border-b border-gray-700 pb-1.5 last:border-0 last:pb-0 pt-0.5">
-                                                                    <span className="font-bold text-red-300 text-[11px]">{a.name}</span>
-                                                                    <span className="text-[10px] text-gray-400 leading-tight">{a.note}</span>
+                                                        {absentees.length > 0 && (
+                                                            <>
+                                                                <div className="bg-red-600 font-bold flex justify-between items-center px-3 py-2 uppercase tracking-wider">
+                                                                    <span>Vắng mặt ({absentees.length})</span>
+                                                                    {isPinned ? (
+                                                                        <button onClick={() => setPinnedTooltip(null)} className="bg-red-700 hover:bg-red-800 rounded p-1 transition shadow-sm"><X size={14} className="text-white"/></button>
+                                                                    ) : (<span className="text-[9px] opacity-80 normal-case">(Bấm để ghim)</span>)}
                                                                 </div>
-                                                            ))}
-                                                        </div>
+                                                                <div className="p-2 space-y-1.5 max-h-40 overflow-y-auto pointer-events-auto">
+                                                                    {absentees.map((a, i) => (
+                                                                        <div key={`ab-${i}`} className="flex flex-col border-b border-gray-700 pb-1.5 last:border-0 last:pb-0 pt-0.5">
+                                                                            <span className="font-bold text-red-300 text-[11px]">{a.name}</span>
+                                                                            <span className="text-[10px] text-gray-400 leading-tight">{a.note}</span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </>
+                                                        )}
+                                                        {partTimers.length > 0 && (
+                                                            <>
+                                                                <div className="bg-yellow-500 text-yellow-900 font-bold flex justify-between items-center px-3 py-1.5 uppercase tracking-wider">
+                                                                    <span>Làm theo ca ({partTimers.length})</span>
+                                                                    {isPinned && absentees.length === 0 && (
+                                                                        <button onClick={() => setPinnedTooltip(null)} className="bg-yellow-600 hover:bg-yellow-700 rounded p-1 transition shadow-sm"><X size={14} className="text-white"/></button>
+                                                                    )}
+                                                                </div>
+                                                                <div className="p-2 space-y-1.5 max-h-40 overflow-y-auto pointer-events-auto bg-gray-800">
+                                                                    {partTimers.map((a, i) => (
+                                                                        <div key={`pt-${i}`} className="flex flex-col border-b border-gray-700 pb-1.5 last:border-0 last:pb-0 pt-0.5">
+                                                                            <span className="font-bold text-yellow-400 text-[11px]">{a.name}</span>
+                                                                            <span className="text-[10px] text-gray-400 leading-tight">{a.note}</span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </>
+                                                        )}
                                                     </div>
                                                 )}
                                             </div>
@@ -1691,23 +1761,46 @@ export default function App() {
                                         const staff = activePersonnel.find(p => p.id === selectedAttendanceStaffId);
                                         const mark = personBatchData[dateStr] !== undefined 
                                             ? personBatchData[dateStr] 
-                                            : (staff?.timesheet?.[dateStr]?.status === 'Đang làm' || staff?.timesheet?.[dateStr]?.status === 'Làm việc' ? 'V' 
-                                               : (staff?.timesheet?.[dateStr]?.status === 'Nghỉ phép' || staff?.timesheet?.[dateStr]?.status === 'Nghỉ' || staff?.timesheet?.[dateStr]?.status === 'Vắng mặt' ? 'X' : ''));
+                                            : (() => {
+                                                const st = staff?.timesheet?.[dateStr]?.status;
+                                                const nt = staff?.timesheet?.[dateStr]?.note;
+                                                if (st === 'Đang làm' || st === 'Làm việc') return 'V';
+                                                if (st === 'Nghỉ phép' || st === 'Nghỉ' || st === 'Vắng mặt') return 'X';
+                                                if (st === 'Part-time') {
+                                                    const hm = nt && nt.match(/(\d+)/);
+                                                    return `P-${hm ? hm[1] : '4'}`;
+                                                }
+                                                return '';
+                                            })();
                                         
                                         let circleClass = "border-gray-200 bg-white text-gray-600 hover:bg-gray-50";
                                         if (mark === 'V') circleClass = "bg-green-500 text-white font-bold shadow-md shadow-green-200 scale-105";
                                         if (mark === 'X') circleClass = "bg-red-500 text-white font-bold shadow-md shadow-red-200 scale-105";
+                                        if (mark?.startsWith('P')) circleClass = "bg-yellow-400 text-black font-bold shadow-md shadow-yellow-200 scale-105";
 
                                         return (
-                                            <div key={dateStr} className="relative flex justify-center py-1 h-full z-0 hover:z-10">
+                                            <div key={dateStr} className="relative flex justify-center py-1 h-full z-0 hover:z-10 focus-within:z-10">
                                                 <button 
                                                     onClick={() => handleTogglePersonDay(dateStr)}
                                                     className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex flex-col items-center justify-center transition-all border-2 ${circleClass}`}
-                                                    title={`Bấm để chuyển: ${mark === '' ? 'Đi làm' : mark === 'V' ? 'Nghỉ' : 'Bỏ chọn'}`}
+                                                    title={`Bấm để chuyển trạng thái`}
                                                 >
                                                     <span className="text-sm sm:text-base">{dayNum}</span>
                                                     {isTodayLocal && <span className={`absolute bottom-[-6px] w-4 h-1 rounded-full ${mark ? 'bg-white' : 'bg-blue-600'}`}></span>}
                                                 </button>
+                                                
+                                                {/* Dropdown chọn giờ nếu là Part-time */}
+                                                {mark?.startsWith('P') && (
+                                                    <div className="absolute top-full mt-1 z-50 animate-in fade-in zoom-in" onClick={(e) => e.stopPropagation()}>
+                                                        <select 
+                                                            value={mark.split('-')[1]}
+                                                            onChange={(e) => setPersonBatchData(prev => ({ ...prev, [dateStr]: `P-${e.target.value}` }))}
+                                                            className="p-1 text-xs rounded shadow-lg border-2 border-yellow-400 bg-yellow-50 text-center font-bold cursor-pointer outline-none text-yellow-900"
+                                                        >
+                                                            {[1,2,3,4,5,6,7,8].map(h => <option key={h} value={h}>{h} tiếng</option>)}
+                                                        </select>
+                                                    </div>
+                                                )}
                                             </div>
                                         );
                                     }
@@ -1961,7 +2054,6 @@ export default function App() {
                      const isAssigning = assigningStation === eq.id;
    
                      if (eq.id === 'TSO2') {
-                        // ... Logic hiển thị riêng cho tủ TSO2 ...
                         const activeBatch = running.length > 0 ? running[0] : null; 
                         const phase = activeBatch?.phase || ''; 
                         const isPaused = activeBatch?.isPaused || false;
@@ -1974,17 +2066,225 @@ export default function App() {
                            else if (phase === 'Sấy khô' && elapsedMs >= DRYING_TIME_MS) { isTimeUp = true; timeColor = 'text-red-600 animate-pulse'; }
                         }
 
-                        // ... Giao diện tủ TSO2 ...
+                        const toggleSO2Pause = async () => {
+                            if (userRole !== 'admin') return;
+                            const now = new Date();
+                            const updatesByOrder = {};
+                            running.forEach(t => {
+                                if (!updatesByOrder[t.orderId]) {
+                                    const targetOrder = orders.find(o => o.id === t.orderId);
+                                    updatesByOrder[t.orderId] = [...targetOrder.tests];
+                                }
+                                const currentTest = updatesByOrder[t.orderId][t.testIndex];
+                                let newAccumulated = currentTest.accumulatedTimeMs || 0;
+                                let newIsPaused = !currentTest.isPaused;
+                                let newLastResumeTime = currentTest.lastResumeTime || currentTest.phaseStartTime;
+                                if (newIsPaused) {
+                                    if (newLastResumeTime) newAccumulated += (now.getTime() - new Date(newLastResumeTime).getTime());
+                                } else {
+                                    newLastResumeTime = now.toISOString();
+                                }
+                                updatesByOrder[t.orderId][t.testIndex] = { ...currentTest, isPaused: newIsPaused, accumulatedTimeMs: newAccumulated, lastResumeTime: newIsPaused ? null : newLastResumeTime };
+                            });
+                            const promises = Object.keys(updatesByOrder).map(orderId => updateDoc(getDocument('orders', orderId), { tests: updatesByOrder[orderId] }));
+                            await Promise.all(promises);
+                        };
+
+                        const finishSO2Batch = async () => {
+                            if (!window.confirm("Hoàn tất và đưa toàn bộ lô mẫu SO2 vào Lịch sử?")) return;
+                            const now = new Date().toISOString();
+                            const updatesByOrder = {};
+                            running.forEach(t => {
+                                if (!updatesByOrder[t.orderId]) {
+                                    const targetOrder = orders.find(o => o.id === t.orderId);
+                                    updatesByOrder[t.orderId] = [...targetOrder.tests];
+                                }
+                                updatesByOrder[t.orderId][t.testIndex] = { ...updatesByOrder[t.orderId][t.testIndex], status: 'Xong', endTime: now, isPaused: false };
+                            });
+                            const promises = Object.keys(updatesByOrder).map(orderId => updateDoc(getDocument('orders', orderId), { tests: updatesByOrder[orderId] }));
+                            await Promise.all(promises);
+                        };
+
+                        const startSO2Batch = async () => {
+                            if (!tso2SelectedUser) { alert("Vui lòng chọn KTV đứng máy!"); return; }
+                            const now = new Date().toISOString();
+                            const updatesByOrder = {};
+                            waiting.forEach(t => {
+                                if (!updatesByOrder[t.orderId]) {
+                                    const targetOrder = orders.find(o => o.id === t.orderId);
+                                    updatesByOrder[t.orderId] = [...targetOrder.tests];
+                                }
+                                updatesByOrder[t.orderId][t.testIndex] = { ...updatesByOrder[t.orderId][t.testIndex], status: 'Đang chạy', phase: 'Ăn mòn', assignedUser: tso2SelectedUser, phaseStartTime: now, lastResumeTime: null, accumulatedTimeMs: 0, isPaused: false };
+                            });
+                            const promises = Object.keys(updatesByOrder).map(orderId => updateDoc(getDocument('orders', orderId), { tests: updatesByOrder[orderId] }));
+                            await Promise.all(promises);
+                            setTso2SelectedUser('');
+                        };
+
+                        const switchSO2Phase = async () => {
+                            if (!window.confirm("Chuyển toàn bộ lô sang Sấy khô (16h)?")) return;
+                            const now = new Date().toISOString();
+                            const updatesByOrder = {};
+                            running.forEach(t => {
+                                if (!updatesByOrder[t.orderId]) {
+                                    const targetOrder = orders.find(o => o.id === t.orderId);
+                                    updatesByOrder[t.orderId] = [...targetOrder.tests];
+                                }
+                                updatesByOrder[t.orderId][t.testIndex] = { ...updatesByOrder[t.orderId][t.testIndex], phase: 'Sấy khô', phaseStartTime: now, lastResumeTime: null, accumulatedTimeMs: 0, isPaused: false };
+                            });
+                            const promises = Object.keys(updatesByOrder).map(orderId => updateDoc(getDocument('orders', orderId), { tests: updatesByOrder[orderId] }));
+                            await Promise.all(promises);
+                        };
+
                         return (
                           <div key={eq.id} className={`bg-white rounded-xl shadow-sm border-2 overflow-hidden flex flex-col h-full relative transition-colors ${isTimeUp ? 'border-red-500 animate-[pulse_2s_ease-in-out_infinite]' : 'border-indigo-200'}`}>
-                            {/* ... NỘI DUNG TSO2 GIỮ NGUYÊN ... */}
+                            <div className={`absolute top-0 right-0 text-white text-[9px] font-bold px-2 py-1 rounded-bl-lg z-10 shadow-sm ${isTimeUp ? 'bg-red-600' : 'bg-indigo-600'}`}>
+                               {isTimeUp ? 'CẦN CHUYỂN PHA' : 'CHU TRÌNH ĐẶC BIỆT'}
+                            </div>
                             <div className={`p-3 lg:p-4 border-b flex justify-between items-center ${isTimeUp ? 'bg-red-50' : 'bg-indigo-50'}`}>
                               <h3 className={`font-bold text-sm lg:text-base flex items-center gap-2 ${isTimeUp ? 'text-red-900' : 'text-indigo-900'}`}>{eq.name}</h3>
                               <button onClick={() => setAssigningStation(isAssigning ? null : eq.id)} className={`text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm border transition ${isAssigning ? 'bg-gray-100' : 'bg-white'}`} disabled={running.length > 0}>{isAssigning ? 'Hủy' : '+ Thêm vào Lô'}</button>
                             </div>
+
+                            {isAssigning && (() => {
+                              const compatibleOrders = orders.filter(o => 
+                                isDeviceCompatibleWithStation(eq.id, o.type) && 
+                                !(o.tests || []).some(t => t && t.equip === eq.id && (t.status === 'Đang chạy' || t.status === 'Chờ chạy'))
+                              );
+                              return (
+                                <div className="p-3 bg-indigo-50/50 border-b border-indigo-100 flex flex-col gap-2">
+                                  <select 
+                                    className="w-full text-sm border-gray-300 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-indigo-300 shadow-sm bg-white"
+                                    value={selectedOrderIdToAssign}
+                                    onChange={(e) => setSelectedOrderIdToAssign(e.target.value)}
+                                  >
+                                    <option value="">-- Chọn Thiết bị cần ghép lô --</option>
+                                    {compatibleOrders.length === 0 ? (
+                                      <option value="" disabled>Không có thiết bị tương thích</option>
+                                    ) : (
+                                      compatibleOrders.map(o => <option key={o.id} value={o.id}>[{o.reqId}] {o.model} ({o.type})</option>)
+                                    )}
+                                  </select>
+                                  <button 
+                                    onClick={async () => {
+                                       if(!selectedOrderIdToAssign || !user) return;
+                                       const targetOrder = orders.find(o => o.id === selectedOrderIdToAssign);
+                                       if(!targetOrder) return;
+                                       const newTest = { name: 'Kiểm định', status: 'Chờ chạy', equip: eq.id };
+                                       const updatedTests = [...(targetOrder.tests || []), newTest];
+                                       try {
+                                           await updateDoc(getDocument('orders', targetOrder.id), { tests: updatedTests });
+                                           setAssigningStation(null);
+                                           setSelectedOrderIdToAssign('');
+                                       } catch (e) {
+                                           setErrorMessage("Lỗi gán: " + e.message);
+                                       }
+                                    }} 
+                                    className="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-bold shadow-md hover:bg-indigo-700 transition w-full disabled:opacity-50"
+                                    disabled={!selectedOrderIdToAssign}
+                                  >Đưa vào Chờ ghép chạy</button>
+                                </div>
+                              );
+                            })()}
+
                             <div className="flex-1 overflow-y-auto flex flex-col p-3">
-                               {/* ... Nội dung list đang chạy, chờ chạy ... */}
-                               <h4 className="text-[10px] font-bold text-gray-500 mb-2 uppercase">Lịch sử đã chạy ({history.length})</h4>
+                               {waiting.length > 0 && running.length === 0 && (
+                                  <div className="p-3 bg-amber-50/50 border-b border-amber-100 mb-3 rounded-lg">
+                                     <h4 className="text-[10px] font-bold text-amber-800 mb-2 uppercase flex items-center gap-1"><Layers size={14}/> Danh sách chờ ghép chạy ({waiting.length})</h4>
+                                     <div className="space-y-1.5 mb-3 max-h-32 overflow-y-auto">
+                                        {waiting.map((test) => (
+                                           <div key={`${test.orderId}-${test.testIndex}`} className="bg-white border border-amber-200 px-2 py-1.5 rounded text-xs text-gray-800 font-medium flex justify-between items-center">
+                                              <div className="flex flex-col">
+                                                 <span>{test.model}</span>
+                                                 <span className="text-gray-400 text-[10px]">{test.reqId}</span>
+                                              </div>
+                                              {userRole === 'admin' && (
+                                                 <button onClick={() => handleRemoveTest(test.orderId, test.testIndex)} className="text-red-500 hover:bg-red-100 hover:text-red-700 p-1.5 rounded transition" title="Gỡ thiết bị khỏi trạm">
+                                                    <X size={14}/>
+                                                 </button>
+                                              )}
+                                           </div>
+                                        ))}
+                                     </div>
+                                     <div className="flex gap-2">
+                                        <select value={tso2SelectedUser} onChange={(e) => setTso2SelectedUser(e.target.value)} className="flex-1 text-xs border-amber-200 rounded p-2 outline-none">
+                                           <option value="">- Chọn KTV -</option>
+                                           {personnel.filter(p => p.status === 'Đang làm' || p.status === 'Làm việc').map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                                        </select>
+                                        <button onClick={startSO2Batch} className="bg-amber-500 text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-amber-600 transition shadow-sm">Bắt đầu Ăn mòn</button>
+                                     </div>
+                                  </div>
+                               )}
+
+                               {running.length > 0 && (
+                                  <div className={`p-3 rounded-lg mb-3 flex-1 flex flex-col ${isTimeUp ? 'bg-red-50/50' : 'bg-blue-50'}`}>
+                                     <div className="flex justify-between items-center mb-2">
+                                        <h4 className={`text-[10px] font-bold uppercase flex items-center gap-1 ${isTimeUp ? 'text-red-800' : 'text-blue-800'}`}><Activity size={14}/> Đang chạy lô ({running.length} mẫu)</h4>
+                                        <span className="text-[10px] bg-white px-2 py-0.5 rounded border border-blue-200 text-blue-600 font-bold">KTV: {activeBatch?.assignedUser}</span>
+                                     </div>
+                                     
+                                     <div className={`bg-white border-2 rounded-xl p-3 shadow-sm ${isTimeUp ? 'border-red-300' : 'border-blue-200'}`}>
+                                        <div className="flex justify-between items-center border-b border-gray-100 pb-2 mb-2">
+                                           <span className={`text-xs font-black uppercase flex items-center gap-1 ${phase === 'Ăn mòn' ? 'text-amber-600' : 'text-blue-600'}`}>
+                                              {phase === 'Ăn mòn' ? <ThermometerSun size={14}/> : <Wind size={14}/>} {phase}
+                                           </span>
+                                           <div className="flex items-center gap-2">
+                                              {isPaused && <span className="text-[9px] font-bold bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded animate-pulse">TẠM DỪNG</span>}
+                                              <span className={`text-xs font-black flex items-center gap-1 ${timeColor}`}>
+                                                 <Timer size={14}/> {formatMs(elapsedMs)}
+                                              </span>
+                                           </div>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-2 text-[10px] font-medium text-gray-600">
+                                           {phase === 'Ăn mòn' ? (
+                                              <>
+                                                 <div className="bg-gray-50 px-2 py-1 rounded flex justify-between"><span>Nhiệt độ:</span><span className="font-bold text-gray-800">25±2°C</span></div>
+                                                 <div className="bg-gray-50 px-2 py-1 rounded flex justify-between"><span>Độ ẩm:</span><span className="font-bold text-gray-800">93±%</span></div>
+                                                 <div className="bg-gray-50 px-2 py-1 rounded flex justify-between col-span-2"><span>Nồng độ SO2:</span><span className="font-bold text-gray-800">25±5 uL/l</span></div>
+                                              </>
+                                           ) : (
+                                              <>
+                                                 <div className="bg-gray-50 px-2 py-1 rounded flex justify-between"><span>Nhiệt độ:</span><span className="font-bold text-gray-800">40°C</span></div>
+                                                 <div className="bg-gray-50 px-2 py-1 rounded flex justify-between"><span>Độ ẩm:</span><span className="font-bold text-gray-800">≤ 50%</span></div>
+                                                 <div className="bg-gray-50 px-2 py-1 rounded flex justify-between"><span>SO2 Flow:</span><span className="font-bold text-gray-800">0</span></div>
+                                                 <div className="bg-gray-50 px-2 py-1 rounded flex justify-between"><span>SO2 Conc:</span><span className="font-bold text-gray-800">0</span></div>
+                                              </>
+                                           )}
+                                        </div>
+                                        <div className="mt-2 space-y-1 max-h-20 overflow-y-auto border-t border-gray-100 pt-2">
+                                           {running.map((test) => (
+                                               <div key={`${test.orderId}-${test.testIndex}`} className="flex justify-between items-center text-[10px] bg-gray-50 px-2 py-1 rounded border border-gray-100">
+                                                   <span className="font-semibold text-gray-700 truncate pr-2">{test.model} ({test.reqId})</span>
+                                                   {userRole === 'admin' && (
+                                                       <button onClick={() => handleRemoveTest(test.orderId, test.testIndex)} className="text-red-500 hover:text-red-700 hover:bg-red-100 p-0.5 rounded transition" title="Gỡ thiết bị khỏi lô">
+                                                           <X size={12}/>
+                                                       </button>
+                                                   )}
+                                               </div>
+                                           ))}
+                                        </div>
+                                        <div className="mt-3 pt-3 border-t border-gray-100 flex flex-col gap-2">
+                                           {userRole === 'admin' && (
+                                               <button onClick={toggleSO2Pause} className={`w-full py-1.5 rounded-lg text-xs font-bold flex justify-center items-center gap-1 shadow-sm transition ${isPaused ? 'bg-emerald-500 hover:bg-emerald-600 text-white' : 'bg-orange-100 hover:bg-orange-200 text-orange-700 border border-orange-300'}`}>
+                                                  {isPaused ? <><Play size={14}/> Tiếp tục đếm giờ</> : <><Pause size={14}/> Quản lý: Tạm dừng máy</>}
+                                               </button>
+                                           )}
+                                           {phase === 'Ăn mòn' ? (
+                                              <button onClick={switchSO2Phase} disabled={!isTimeUp || isPaused} className={`w-full py-2.5 rounded-lg text-xs font-bold text-white shadow-sm transition ${(!isTimeUp || isPaused) ? 'bg-gray-300 cursor-not-allowed' : 'bg-amber-500 hover:bg-amber-600 animate-bounce'}`}>
+                                                 {(!isTimeUp || isPaused) ? 'Đang trong quá trình Ăn mòn...' : 'Chuyển sang Sấy khô (16 giờ)'}
+                                              </button>
+                                           ) : (
+                                              <button onClick={finishSO2Batch} disabled={!isTimeUp || isPaused} className={`w-full py-2.5 rounded-lg text-xs font-bold text-white shadow-sm transition ${(!isTimeUp || isPaused) ? 'bg-gray-300 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700 animate-bounce'}`}>
+                                                 {(!isTimeUp || isPaused) ? 'Đang Sấy khô...' : 'Kết thúc hoàn toàn bài test SO2'}
+                                              </button>
+                                           )}
+                                        </div>
+                                     </div>
+                                  </div>
+                               )}
+
+                               <h4 className="text-[10px] font-bold text-gray-500 mb-2 uppercase border-t pt-3 mt-auto">Lịch sử đã chạy ({history.length})</h4>
+                               {history.length === 0 && <p className="text-[11px] text-gray-400 italic text-center py-1">Chưa có lịch sử.</p>}
                                {history.map((test) => (
                                  <div key={`${test.orderId}-${test.testIndex}`} className="bg-gray-50 p-2 rounded-lg border border-gray-100 mb-1 flex justify-between items-center">
                                    <span className="text-[11px] font-medium text-gray-600">{test.model}</span>
@@ -2002,20 +2302,85 @@ export default function App() {
                          <div className="p-3 lg:p-4 border-b bg-blue-50 flex justify-between items-center">
                            <h3 className="font-bold text-sm lg:text-base text-blue-900">{eq.name}</h3>
                            <div className="flex gap-2">
-                             <button onClick={() => setAssigningStation(isAssigning ? null : eq.id)} className="text-xs font-bold px-3 py-1.5 bg-white rounded-lg border">{isAssigning ? 'Hủy' : '+ Thêm TB'}</button>
-                             {userRole === 'admin' && <button onClick={() => handleDeleteStation(eq.id, eq.name)} className="p-1.5 bg-white text-red-500 rounded-lg border"><Trash2 size={14}/></button>}
+                             <button onClick={() => setAssigningStation(isAssigning ? null : eq.id)} className="text-xs font-bold px-3 py-1.5 bg-white rounded-lg border shadow-sm">{isAssigning ? 'Hủy' : '+ Thêm TB'}</button>
+                             {userRole === 'admin' && <button onClick={() => handleDeleteStation(eq.id, eq.name)} className="p-1.5 bg-white text-red-500 rounded-lg border shadow-sm"><Trash2 size={14}/></button>}
                            </div>
                          </div>
-                         <div className="p-3 lg:p-4 flex-1 overflow-y-auto">
-                           {/* ... Nội dung chạy máy thường ... */}
-                           <h4 className="text-xs font-bold text-blue-700 mb-2">Đang chạy ({running.length})</h4>
-                           {running.map((test) => (
-                             <div key={`${test.orderId}-${test.testIndex}`} className="bg-white p-3 rounded-lg border border-blue-200 mb-2 shadow-sm flex justify-between items-center">
-                               <div className="flex-1">
-                                 <div className="text-sm font-semibold">{test.model}</div>
-                                 <div className="text-[10px] text-gray-500">{test.assignedUser}</div>
+
+                         {isAssigning && (() => {
+                           const compatibleOrders = orders.filter(o => 
+                             isDeviceCompatibleWithStation(eq.id, o.type) && 
+                             !(o.tests || []).some(t => t && t.equip === eq.id && (t.status === 'Đang chạy' || t.status === 'Chờ chạy'))
+                           );
+                           return (
+                             <div className="p-3 lg:p-4 bg-blue-50/40 border-b border-blue-100 flex flex-col gap-3">
+                               <select 
+                                 className="w-full text-sm border-gray-300 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-300 shadow-sm bg-white"
+                                 value={selectedOrderIdToAssign}
+                                 onChange={(e) => setSelectedOrderIdToAssign(e.target.value)}
+                               >
+                                 <option value="">-- Chọn Thiết bị cần chạy --</option>
+                                 {compatibleOrders.length === 0 ? (
+                                   <option value="" disabled>Không có thiết bị tương thích</option>
+                                 ) : (
+                                   compatibleOrders.map(o => <option key={o.id} value={o.id}>[{o.reqId}] {o.model} ({o.type})</option>)
+                                 )}
+                               </select>
+                               
+                               <div className="flex gap-2">
+                                 <select 
+                                   className="flex-1 text-sm border-gray-300 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-300 shadow-sm bg-white"
+                                   value={selectedPersonnelToAssign}
+                                   onChange={(e) => setSelectedPersonnelToAssign(e.target.value)}
+                                 >
+                                   <option value="">-- Chọn KTV chạy máy --</option>
+                                   {personnel.filter(p => p.status === 'Đang làm' || p.status === 'Làm việc').map(p => (
+                                      <option key={p.id} value={p.name}>{p.name} ({p.role})</option>
+                                   ))}
+                                 </select>
+                                 <button 
+                                   onClick={() => handleAssignToStation(eq.id)} 
+                                   className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-bold shadow-md hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                   disabled={!selectedOrderIdToAssign || compatibleOrders.length === 0}
+                                 >Bắt đầu</button>
                                </div>
-                               <button onClick={() => markTestAsDone(test.orderId, test.testIndex)} className="text-xs bg-green-50 text-green-700 px-3 py-1.5 rounded-lg border">Xong</button>
+                             </div>
+                           );
+                         })()}
+
+                         <div className="p-3 lg:p-4 flex-1 overflow-y-auto">
+                           <h4 className="text-xs font-bold text-blue-700 mb-2 flex items-center gap-1 uppercase tracking-wide"><Activity size={14}/> Đang chạy ({running.length})</h4>
+                           {running.length === 0 && <p className="text-[11px] text-gray-400 italic bg-gray-50 p-2 rounded text-center mb-4">Trạm đang trống.</p>}
+                           {running.map((test) => (
+                             <div key={`${test.orderId}-${test.testIndex}`} className="bg-white p-3 rounded-lg border border-blue-200 mb-2 shadow-sm flex justify-between items-center border-l-4 border-l-blue-500">
+                               <div className="flex-1 pr-2">
+                                 <div className="text-[10px] text-gray-500 font-bold mb-0.5">{test.reqId}</div>
+                                 <div className="text-sm font-semibold text-gray-800 leading-tight">{test.model}</div>
+                                 <div className="text-[10px] font-medium text-indigo-600 mt-1 flex items-center gap-1">
+                                    <Briefcase size={10}/> {test.assignedUser || 'Chưa phân công'}
+                                 </div>
+                               </div>
+                               <div className="flex items-center gap-1.5 shrink-0">
+                                 {userRole === 'admin' && (
+                                    <button onClick={() => handleRemoveTest(test.orderId, test.testIndex)} className="text-xs bg-red-50 text-red-600 border border-red-200 p-2 rounded-lg font-bold hover:bg-red-100 transition" title="Gỡ khỏi trạm">
+                                       <Trash2 size={14}/>
+                                    </button>
+                                 )}
+                                 <button onClick={() => markTestAsDone(test.orderId, test.testIndex)} className="text-xs bg-green-50 text-green-700 border border-green-200 px-4 py-2 rounded-lg font-bold hover:bg-green-100 transition">Xong</button>
+                               </div>
+                             </div>
+                           ))}
+
+                           <h4 className="text-xs font-bold text-gray-500 mb-2 flex items-center gap-1 uppercase tracking-wide border-t pt-4 mt-4"><History size={14}/> Lịch sử ({history.length})</h4>
+                           {history.length === 0 && <p className="text-[11px] text-gray-400 italic text-center py-1">Chưa có lịch sử.</p>}
+                           {history.map((test) => (
+                             <div key={`${test.orderId}-${test.testIndex}`} className="bg-gray-50 p-2 lg:p-3 rounded-lg border border-gray-100 mb-2 flex justify-between items-center">
+                               <div>
+                                 <div className="text-[9px] text-gray-400 line-through">{test.reqId}</div>
+                                 <div className="text-xs font-medium text-gray-600">{test.model}</div>
+                                 <div className="text-[8px] text-gray-400 mt-0.5">👤 {test.assignedUser}</div>
+                               </div>
+                               <CheckCircle2 size={16} className="text-green-500 shrink-0" />
                              </div>
                            ))}
                          </div>
