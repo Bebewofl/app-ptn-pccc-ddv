@@ -1,18 +1,18 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { 
   getFirestore, collection, onSnapshot, doc, setDoc, updateDoc, deleteDoc
 } from 'firebase/firestore';
 
 import { 
-  ClipboardList, Settings2, LayoutDashboard, CheckCircle2, Users, Sun, Moon, AlertTriangle, Calendar, Activity, Archive, Printer, Search, UploadCloud, Loader2, RefreshCw, XCircle, PlusCircle, Trash2, Edit2, Check, X, History, Briefcase, ChevronDown, ChevronUp, ChevronRight, ShieldAlert, Filter, Download, FileSpreadsheet, LogOut, KeyRound, ListFilter, ThermometerSun, Wind, Timer, Pause, Play, Layers, UserMinus, UserCheck, UserX, Clock, CalendarCheck, ShieldCheck, UserCog, Crosshair, Cpu, Database, ChevronsLeft, ChevronLeft, ChevronsRight
+  ClipboardList, Settings2, LayoutDashboard, CheckCircle2, Users, Sun, Moon, AlertTriangle, Calendar, Activity, Archive, Printer, Search, UploadCloud, Loader2, X, PlusCircle, Trash2, Edit2, Check, History, Briefcase, ChevronDown, ChevronUp, ChevronRight, Download, LogOut, KeyRound, ThermometerSun, Wind, Timer, Pause, Play, Layers, UserMinus, UserCheck, UserX, CalendarCheck, Crosshair, Cpu, Database, ChevronsLeft, ChevronLeft, ChevronsRight
 } from 'lucide-react';
 
 // =========================================================================
-// 🚀 CẤU HÌNH FIREBASE ÉP BUỘC KẾT NỐI VÀO DB GỐC CỦA BẠN (KHÔNG DÙNG DB ẢO)
+// 🚀 CẤU HÌNH FIREBASE VÀ ĐƯỜNG DẪN DỮ LIỆU CHUẨN (BẢO VỆ DỮ LIỆU)
 // =========================================================================
-const firebaseConfig = {
+const fallbackConfig = {
   apiKey: "AIzaSyCoYYrj_cuqwm_5N0NQLUCEzKGh7DYheDE",
   authDomain: "app-ptn-pccc.firebaseapp.com",
   projectId: "app-ptn-pccc",
@@ -21,27 +21,27 @@ const firebaseConfig = {
   appId: "1:1070884929418:web:aa64e2aac0b01b53821273"
 };
 
+const firebaseConfig = typeof __firebase_config !== 'undefined' && Object.keys(JSON.parse(__firebase_config || '{}')).length > 0 
+  ? JSON.parse(__firebase_config) : fallbackConfig;
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// Ép buộc kết nối trực tiếp vào Collection gốc của bạn
-const getCol = (colName) => collection(db, colName);
-const getDocument = (colName, docId) => doc(db, colName, docId);
+// SỬ DỤNG ĐƯỜNG DẪN CANVAS ĐỂ KHÔI PHỤC LẠI DỮ LIỆU HIỆN CÓ CỦA BẠN
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const getCol = (colName) => collection(db, 'artifacts', appId, 'public', 'data', colName);
+const getDocument = (colName, docId) => doc(db, 'artifacts', appId, 'public', 'data', colName, docId);
 
 // =========================================================================
-// 🚀 HÀM HỖ TRỢ LÕI
+// 🚀 HÀM HỖ TRỢ
 // =========================================================================
 const getLocalYYYYMMDD = (date) => {
   const offset = date.getTimezoneOffset();
-  const localDate = new Date(date.getTime() - (offset * 60 * 1000));
-  return localDate.toISOString().split('T')[0];
+  return new Date(date.getTime() - (offset * 60 * 1000)).toISOString().split('T')[0];
 };
 
-const isSundayStr = (dateStr) => {
-  if (!dateStr) return false;
-  return new Date(dateStr).getDay() === 0;
-};
+const isSundayStr = (dateStr) => dateStr ? new Date(dateStr).getDay() === 0 : false;
 
 const getRoleWeight = (role) => {
   const r = String(role || '').toLowerCase();
@@ -54,11 +54,8 @@ const getRoleWeight = (role) => {
 
 const getElapsedMs = (test, currentTime) => {
    let elapsed = test.accumulatedTimeMs || 0;
-   if (!test.isPaused && test.lastResumeTime) {
-       elapsed += (currentTime.getTime() - new Date(test.lastResumeTime).getTime());
-   } else if (!test.isPaused && test.phaseStartTime && !test.lastResumeTime) {
-       elapsed += (currentTime.getTime() - new Date(test.phaseStartTime).getTime());
-   }
+   if (!test.isPaused && test.lastResumeTime) elapsed += (currentTime.getTime() - new Date(test.lastResumeTime).getTime());
+   else if (!test.isPaused && test.phaseStartTime && !test.lastResumeTime) elapsed += (currentTime.getTime() - new Date(test.phaseStartTime).getTime());
    return Math.max(0, elapsed);
 };
 
@@ -89,9 +86,9 @@ const categorizeDevice = (type) => {
 };
 
 const navItems = [
-  { id: 'dashboard', icon: LayoutDashboard, label: 'TỔNG QUAN HỆ THỐNG' },
-  { id: 'orders', icon: ClipboardList, label: 'QUẢN LÝ ĐƠN KĐ' },
-  { id: 'inventory', icon: Database, label: 'DỮ LIỆU KHO' },
+  { id: 'dashboard', icon: LayoutDashboard, label: 'TỔNG QUAN' },
+  { id: 'orders', icon: ClipboardList, label: 'ĐƠN KĐ' },
+  { id: 'inventory', icon: Database, label: 'KHO HÀNG' },
   { id: 'equipment', icon: Cpu, label: 'TRẠM MÁY' },
   { id: 'personnel', icon: Users, label: 'NHÂN SỰ' },
 ];
@@ -100,6 +97,8 @@ export default function App() {
   const [userRole, setUserRole] = useState(null); 
   const [loginPassword, setLoginPassword] = useState('');
   const [showLoginError, setShowLoginError] = useState(false);
+  const [user, setUser] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   const [activeTab, setActiveTab] = useState('dashboard');
   const [currentShift, setCurrentShift] = useState('Ngày');
@@ -107,34 +106,17 @@ export default function App() {
   const [orderSearchTerm, setOrderSearchTerm] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [isUploadingPersonnel, setIsUploadingPersonnel] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
   
   const [isOrderDetailsExpanded, setIsOrderDetailsExpanded] = useState(false);
   const [isPersonnelExpanded, setIsPersonnelExpanded] = useState(false);
   const [showOrderModal, setShowOrderModal] = useState(false);
   const [orderModalFilter, setOrderModalFilter] = useState('Quá hạn');
 
-  // Print Config State
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [printMonth, setPrintMonth] = useState(new Date().getMonth() + 1);
   const [printYear, setPrintYear] = useState(new Date().getFullYear());
   const [isPrintingMonthly, setIsPrintingMonthly] = useState(false);
-
   const [currentTime, setCurrentTime] = useState(new Date());
-  
-  useEffect(() => {
-    // Nhúng thư viện Xuất PDF Html2Pdf
-    const script = document.createElement('script');
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
-    script.async = true;
-    document.body.appendChild(script);
-
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-  
-  const [user, setUser] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
 
   const [personnel, setPersonnel] = useState([]);
   const [samplesInStock, setSamplesInStock] = useState([]);
@@ -160,9 +142,7 @@ export default function App() {
   const [confirmDeleteSampleId, setConfirmDeleteSampleId] = useState(null);
   const [editSampleData, setEditSampleData] = useState({ client: '', type: '', model: '', qty: 1 });
 
-  const [editingOrderId, setEditingOrderId] = useState(null);
   const [confirmDeleteOrderId, setConfirmDeleteOrderId] = useState(null);
-  const [editOrderData, setEditOrderData] = useState({ client: '', type: '', model: '', sampleSize: 1, deadline: '', urgency: 'Bình thường' });
   const [showAddOrder, setShowAddOrder] = useState(false);
   const [newOrderData, setNewOrderData] = useState({ client: '', type: 'Tủ trung tâm', model: '', sampleSize: 1, deadline: '', urgency: 'Mới' });
 
@@ -175,79 +155,48 @@ export default function App() {
   const todayStr = getLocalYYYYMMDD(new Date());
   const isTodaySunday = new Date().getDay() === 0;
 
-  // --- LOGIC PHÂN QUYỀN TRUY CẬP BUTTONS ---
   const canEditData = userRole === 'ADMIN' || userRole === 'USER'; 
   const isSuperAdmin = userRole === 'ADMIN'; 
 
-  const handleLogin = () => {
-    if (loginPassword === '9299') setUserRole('ADMIN');
-    else if (loginPassword === '6789') setUserRole('USER');
-    else if (loginPassword === '3333') setUserRole('TESTER');
-    else setShowLoginError(true);
-  };
+  // =========================================================================
+  // LOGIC XỬ LÝ DỮ LIỆU
+  // =========================================================================
+  const printDaysArray = useMemo(() => {
+    const daysInPrintMonth = new Date(printYear, printMonth, 0).getDate();
+    return Array.from({length: daysInPrintMonth}, (_, i) => `${printYear}-${String(printMonth).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`);
+  }, [printYear, printMonth]);
 
-  const handleLogout = () => {
-    setUserRole(null);
-    setLoginPassword('');
-  };
-
-  const getItemStatus = (item) => {
-    if (!item.tests || !Array.isArray(item.tests) || item.tests.length === 0) return { text: 'KHO_CHỜ', color: 'text-slate-500 bg-slate-900 border-slate-700' };
-    const validTests = item.tests.filter(t => t);
-    if (validTests.length === 0) return { text: 'KHO_CHỜ', color: 'text-slate-500 bg-slate-900 border-slate-700' };
-
-    const runningTests = validTests.filter(t => t.status === 'Đang chạy');
-    if (runningTests.length > 0) {
-       const stations = runningTests.map(t => t.equip).join(', ');
-       return { text: `ĐANG_CHẠY (${stations})`, color: 'text-emerald-400 bg-emerald-950/30 border-emerald-800' };
-    }
-    const waitingTests = validTests.filter(t => t.status === 'Chờ chạy');
-    if (waitingTests.length > 0) {
-       return { text: `CHỜ_GHÉP_MÁY`, color: 'text-amber-400 bg-amber-950/30 border-amber-800' };
-    }
-    const allDone = validTests.every(t => t.status === 'Xong');
-    if (allDone) return { text: 'HOÀN_THÀNH', color: 'text-cyan-400 bg-cyan-950/30 border-cyan-800' };
-    return { text: 'ĐANG_XỬ_LÝ', color: 'text-indigo-400 bg-indigo-950/30 border-indigo-800' };
-  };
-
-  const filteredOrders = useMemo(() => {
-    return orders.filter(o => {
-      let match = true;
-      if (orderSearchTerm) {
-         const term = orderSearchTerm.toLowerCase();
-         if (!(o.model || '').toLowerCase().includes(term) && !(o.client || '').toLowerCase().includes(term) && !(o.reqId || '').toLowerCase().includes(term)) match = false;
-      }
-      return match;
-    });
-  }, [orders, orderSearchTerm]);
+  const filteredOrders = useMemo(() => orders.filter(o => {
+      if (!orderSearchTerm) return true;
+      const term = orderSearchTerm.toLowerCase();
+      return (o.model || '').toLowerCase().includes(term) || (o.client || '').toLowerCase().includes(term) || (o.reqId || '').toLowerCase().includes(term);
+  }), [orders, orderSearchTerm]);
 
   const groupedOrdersArr = useMemo(() => {
     const groups = {};
     filteredOrders.forEach(o => {
       const groupKey = String(o.client).trim().toUpperCase(); 
-      if (!groups[groupKey]) {
-        groups[groupKey] = { groupId: groupKey, reqId: o.reqId, client: o.client, deadline: o.deadline, urgency: o.urgency, items: [], totalQty: 0 };
-      }
+      if (!groups[groupKey]) groups[groupKey] = { groupId: groupKey, reqId: o.reqId, client: o.client, deadline: o.deadline, urgency: o.urgency, items: [], totalQty: 0 };
       groups[groupKey].items.push(o);
       groups[groupKey].totalQty += Number(o.sampleSize || 1);
       if (o.urgency === 'Quá hạn') groups[groupKey].urgency = 'Quá hạn';
       else if (o.urgency === 'Gấp' && groups[groupKey].urgency !== 'Quá hạn') groups[groupKey].urgency = 'Gấp';
     });
     return Object.values(groups).map(group => {
-      let totalTests = 0; let doneTests = 0;
+      let totalTests = 0, doneTests = 0;
       group.items.forEach(item => {
-        if (item.tests && Array.isArray(item.tests)) {
-          const valid = item.tests.filter(t => t);
-          if (valid.length > 0) {
-              totalTests += valid.length;
-              doneTests += valid.filter(t => t.status === 'Xong').length;
-          } else totalTests += 1;
-        } else totalTests += 1; 
+        const valid = (item.tests && Array.isArray(item.tests)) ? item.tests.filter(t => t) : [];
+        if (valid.length > 0) { totalTests += valid.length; doneTests += valid.filter(t => t.status === 'Xong').length; } 
+        else totalTests += 1; 
       });
       group.progress = totalTests === 0 ? 0 : Math.round((doneTests / totalTests) * 100);
       return group;
     });
   }, [filteredOrders]);
+
+  const overdueGroups = useMemo(() => groupedOrdersArr.filter(g => g.urgency === 'Quá hạn'), [groupedOrdersArr]);
+  const urgentGroupsOnly = useMemo(() => groupedOrdersArr.filter(g => g.urgency === 'Gấp'), [groupedOrdersArr]);
+  const runningGroups = useMemo(() => groupedOrdersArr.filter(g => g.items.some(item => item.tests?.some(t => t?.status === 'Đang chạy'))), [groupedOrdersArr]);
 
   const duplicateCounts = useMemo(() => {
     const counts = {};
@@ -264,6 +213,115 @@ export default function App() {
     return duplicateCounts[key] > 1; 
   };
 
+  const activeStaff = useMemo(() => personnel.filter(p => p.status === 'Đang làm' || p.status === 'Làm việc' || p.status === 'Part-time').sort((a, b) => getRoleWeight(a.role) - getRoleWeight(b.role) || (a.name||'').localeCompare(b.name||'','vi')), [personnel]);
+  const activePersonnel = useMemo(() => personnel.filter(p => p.status !== 'Đã nghỉ việc').sort((a, b) => getRoleWeight(a.role) - getRoleWeight(b.role) || (a.name||'').localeCompare(b.name||'','vi')), [personnel]);
+  
+  const operatorStaff = useMemo(() => activeStaff.filter(p => {
+     const r = String(p.role).toLowerCase();
+     return !r.includes('hành chính') && !r.includes('thư ký') && !r.includes('quản lý') && !r.includes('kế toán');
+  }), [activeStaff]);
+
+  const { countHC, countNgay, countDem } = useMemo(() => {
+    let hc = 0, ngay = 0, dem = 0;
+    activeStaff.forEach(p => {
+       const s = String(p.shift || '').toLowerCase();
+       if (s.includes('hành chính') || s === 'hc') hc++; else if (s.includes('đêm')) dem++; else ngay++; 
+    });
+    return { countHC: hc, countNgay: ngay, countDem: dem };
+  }, [activeStaff]);
+
+  const staffLocations = useMemo(() => {
+    const locs = {};
+    orders.forEach(o => o.tests?.forEach(t => {
+      if (t?.status === 'Đang chạy' && t.assignedUser && t.assignedUser !== 'Chưa phân công') {
+        if (!locs[t.assignedUser]) locs[t.assignedUser] = new Set();
+        locs[t.assignedUser].add(equipments.find(e => e.id === t.equip)?.name || t.equip);
+      }
+    }));
+    return locs;
+  }, [orders, equipments]);
+
+  const dashboardStaff = useMemo(() => activeStaff.filter(p => {
+     const timesheetToday = p.timesheet?.[todayStr]?.status;
+     if (isTodaySunday) return timesheetToday === 'Đang làm' || timesheetToday === 'Làm việc' || timesheetToday === 'Part-time' || (staffLocations[p.name] && staffLocations[p.name].size > 0);
+     const s = String(p.shift || 'Hành Chính').toLowerCase();
+     const isDayPerson = s.includes('hành chính') || s === 'hc' || s.includes('ngày') || s.includes('part');
+     return currentShift === 'Ngày' ? isDayPerson : (!isDayPerson || (staffLocations[p.name] && staffLocations[p.name].size > 0));
+  }), [activeStaff, currentShift, staffLocations, todayStr, isTodaySunday]);
+
+  // =========================================================================
+  // EFFECTS KHỞI TẠO HỆ THỐNG VÀ FIREBASE
+  // =========================================================================
+  useEffect(() => {
+    const script = document.createElement('script');
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
+    script.async = true;
+    document.body.appendChild(script);
+
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const initAuth = async () => { 
+        try { 
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(auth, __initial_auth_token);
+            else await signInAnonymously(auth); 
+        } catch (error) { console.error("Lỗi xác thực:", error); setIsLoading(false); } 
+    };
+    initAuth();
+    
+    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser); 
+      if (!currentUser) setIsLoading(false);
+    });
+
+    const safeTimer = setTimeout(() => setIsLoading(false), 5000);
+    return () => { unsubscribeAuth(); clearTimeout(safeTimer); };
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const errHandler = (err) => { console.warn("Lỗi Firebase:", err.message); setIsLoading(false); };
+
+    const unsubPersonnel = onSnapshot(getCol('personnel'), (snap) => setPersonnel(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))), errHandler);
+    const unsubEquipments = onSnapshot(getCol('equipments'), (snap) => {
+       const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+       const core = [ { id: 'TNL-K', name: 'Tunel Khói' }, { id: 'TNL-N', name: 'Tunel Nhiệt' }, { id: 'MR', name: 'Máy Rung' }, { id: 'TNA-N', name: 'Tủ Nóng ẩm cỡ nhỏ' }, { id: 'TNA-T', name: 'Tủ Nóng ẩm cỡ trung' }, { id: 'TSO2', name: 'Tủ SO2' }, { id: 'PAS', name: 'Phòng âm thanh + ánh sáng' } ];
+       core.forEach(c => { if (!data.some(eq => eq.id === c.id)) setDoc(getDocument('equipments', c.id), c).catch(e=>console.warn(e)); });
+       setEquipments(data.sort((a, b) => { if(a.id==='TSO2') return -1; if(b.id==='TSO2') return 1; return (a.name||'').localeCompare(b.name||'','vi'); }));
+    }, errHandler);
+    const unsubSamples = onSnapshot(getCol('samplesInStock'), (snap) => setSamplesInStock(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))), errHandler);
+    const unsubOrders = onSnapshot(getCol('orders'), (snap) => { setOrders(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))); setIsLoading(false); }, errHandler);
+    return () => { unsubPersonnel(); unsubSamples(); unsubEquipments(); unsubOrders(); };
+  }, [user]);
+
+  useEffect(() => {
+      if (showAttendanceCalendar && attendanceMode === 'date') {
+          const batch = {};
+          activePersonnel.forEach(p => {
+              const status = p.timesheet?.[selectedAttendanceDate]?.status;
+              const note = p.timesheet?.[selectedAttendanceDate]?.note;
+              if (status === 'Đang làm' || status === 'Làm việc') batch[p.id] = 'V';
+              else if (status === 'Nghỉ phép' || status === 'Nghỉ' || status === 'Vắng mặt') batch[p.id] = 'X';
+              else if (status === 'Part-time') batch[p.id] = `P-${note?.match(/(\d+)/)?.[1] || '4'}`;
+              else batch[p.id] = ''; 
+          });
+          setAttendanceBatchData(batch);
+      } else if (showAttendanceCalendar && attendanceMode === 'person') setPersonBatchData({});
+  }, [showAttendanceCalendar, selectedAttendanceDate, attendanceMode, selectedAttendanceStaffId, activePersonnel]);
+
+  // =========================================================================
+  // HANDLERS
+  // =========================================================================
+  const handleLogin = () => {
+    if (loginPassword === '9299') setUserRole('ADMIN');
+    else if (loginPassword === '6789') setUserRole('USER');
+    else if (loginPassword === '3333') setUserRole('TESTER');
+    else setShowLoginError(true);
+  };
+  const handleLogout = () => { setUserRole(null); setLoginPassword(''); };
+
   const isDeviceCompatibleWithStation = (stationId, deviceType) => {
     const cat = categorizeDevice(deviceType);
     switch (stationId) {
@@ -271,8 +329,19 @@ export default function App() {
       case 'TNL-N': return cat === 'Đầu báo nhiệt';
       case 'TSO2': return ['Đầu báo khói', 'Đầu báo nhiệt', 'Chuông báo cháy', 'Đèn báo cháy', 'Nút ấn báo cháy', 'Còi đèn kết hợp'].includes(cat);
       case 'PAS': return ['Chuông báo cháy', 'Đèn báo cháy', 'Còi đèn kết hợp'].includes(cat);
-      case 'MR': case 'TNA-N': case 'TNA-T': default: return true; 
+      default: return true; 
     }
+  };
+
+  const getItemStatus = (item) => {
+    if (!item.tests || !Array.isArray(item.tests) || item.tests.length === 0) return { text: 'KHO_CHỜ', color: 'text-slate-500 bg-slate-900 border-slate-700' };
+    const validTests = item.tests.filter(t => t);
+    if (validTests.length === 0) return { text: 'KHO_CHỜ', color: 'text-slate-500 bg-slate-900 border-slate-700' };
+    const runningTests = validTests.filter(t => t.status === 'Đang chạy');
+    if (runningTests.length > 0) return { text: `ĐANG_CHẠY (${runningTests.map(t => t.equip).join(', ')})`, color: 'text-emerald-400 bg-emerald-950/30 border-emerald-800' };
+    if (validTests.some(t => t.status === 'Chờ chạy')) return { text: `CHỜ_GHÉP_MÁY`, color: 'text-amber-400 bg-amber-950/30 border-amber-800' };
+    if (validTests.every(t => t.status === 'Xong')) return { text: 'HOÀN_THÀNH', color: 'text-cyan-400 bg-cyan-950/30 border-cyan-800' };
+    return { text: 'ĐANG_XỬ_LÝ', color: 'text-indigo-400 bg-indigo-950/30 border-indigo-800' };
   };
 
   const handleDeleteAllDuplicates = async () => {
@@ -284,12 +353,8 @@ export default function App() {
     samplesInStock.forEach(sample => {
       const key = `${String(sample.client).trim().toLowerCase()}_${String(sample.type).trim().toLowerCase()}_${String(sample.model).trim().toLowerCase()}`;
       if (!keptSamples.has(key)) keptSamples.set(key, { ...sample, qty: Number(sample.qty || 1) });
-      else {
-        keptSamples.get(key).qty += Number(sample.qty || 1);
-        deletePromises.push(deleteDoc(getDocument('samplesInStock', sample.id)));
-      }
+      else { keptSamples.get(key).qty += Number(sample.qty || 1); deletePromises.push(deleteDoc(getDocument('samplesInStock', sample.id))); }
     });
-
     keptSamples.forEach(sample => {
        const original = samplesInStock.find(s => s.id === sample.id);
        if (original && Number(original.qty) !== sample.qty) updatePromises.push(updateDoc(getDocument('samplesInStock', sample.id), { qty: sample.qty }));
@@ -298,12 +363,8 @@ export default function App() {
     orders.forEach(order => {
        const key = `${String(order.client).trim().toLowerCase()}_${String(order.type).trim().toLowerCase()}_${String(order.model).trim().toLowerCase()}`;
        if (!keptOrders.has(key)) keptOrders.set(key, { ...order, sampleSize: Number(order.sampleSize || 1) });
-       else {
-          keptOrders.get(key).sampleSize += Number(order.sampleSize || 1);
-          deletePromises.push(deleteDoc(getDocument('orders', order.id)));
-       }
+       else { keptOrders.get(key).sampleSize += Number(order.sampleSize || 1); deletePromises.push(deleteDoc(getDocument('orders', order.id))); }
     });
-
     keptOrders.forEach(order => {
        const original = orders.find(o => o.id === order.id);
        if (original && Number(original.sampleSize) !== order.sampleSize) updatePromises.push(updateDoc(getDocument('orders', order.id), { sampleSize: order.sampleSize }));
@@ -313,7 +374,7 @@ export default function App() {
       try {
         await Promise.all([...deletePromises, ...updatePromises]);
         alert(`Thành công! Đã cập nhật ${deletePromises.length + updatePromises.length} bản ghi.`);
-      } catch (err) { setErrorMessage("Lỗi gộp mã: " + err.message); }
+      } catch (err) { alert("Lỗi gộp mã: " + err.message); }
     } else alert("Dữ liệu đã sạch, không có bản ghi bị chia nhỏ!");
   };
 
@@ -334,177 +395,9 @@ export default function App() {
     link.click(); URL.revokeObjectURL(url);
   };
 
-  // --- LOGIC XUẤT PDF CHUYÊN NGHIỆP ---
-  const handleExportPDF = () => {
-    if (!window.html2pdf) {
-        window.print();
-        return;
-    }
-    const container = document.createElement('div');
-    let title = ""; let tableHTML = "";
-
-    if (activeTab === 'orders') {
-        title = "BÁO CÁO TRẠNG THÁI ĐƠN KIỂM ĐỊNH";
-        tableHTML = `
-            <table style="width:100%; border-collapse:collapse; font-size:11px; margin-top:15px;">
-                <tr style="background-color:#f1f5f9;">
-                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:left;">Mã Đơn</th>
-                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:left;">Khách Hàng</th>
-                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:center;">Hạn Chót</th>
-                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:center;">Mức Độ</th>
-                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:center;">Tổng TB</th>
-                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:center;">Tiến Độ</th>
-                </tr>
-                ${groupedOrdersArr.map(g => `
-                    <tr>
-                        <td style="border:1px solid #cbd5e1; padding:8px; font-weight:bold;">${g.reqId}</td>
-                        <td style="border:1px solid #cbd5e1; padding:8px;">${g.client}</td>
-                        <td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">${g.deadline}</td>
-                        <td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">${g.urgency}</td>
-                        <td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">${g.totalQty}</td>
-                        <td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">${g.progress}%</td>
-                    </tr>
-                `).join('')}
-            </table>
-        `;
-    } else if (activeTab === 'inventory') {
-        title = "BÁO CÁO KIỂM KÊ KHO THIẾT BỊ";
-        tableHTML = `
-            <table style="width:100%; border-collapse:collapse; font-size:11px; margin-top:15px;">
-                <tr style="background-color:#f1f5f9;">
-                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:left;">Khách Hàng</th>
-                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:left;">Loại TB</th>
-                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:left;">Model</th>
-                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:center;">Tồn Kho</th>
-                </tr>
-                ${samplesInStock.map(s => `
-                    <tr>
-                        <td style="border:1px solid #cbd5e1; padding:8px;">${s.client}</td>
-                        <td style="border:1px solid #cbd5e1; padding:8px;">${s.type}</td>
-                        <td style="border:1px solid #cbd5e1; padding:8px; font-weight:bold;">${s.model}</td>
-                        <td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">${s.qty}</td>
-                    </tr>
-                `).join('')}
-            </table>
-        `;
-    } else if (activeTab === 'personnel') {
-        title = "DANH SÁCH NHÂN SỰ VẬN HÀNH";
-        tableHTML = `
-            <table style="width:100%; border-collapse:collapse; font-size:11px; margin-top:15px;">
-                <tr style="background-color:#f1f5f9;">
-                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:left;">Họ và Tên</th>
-                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:left;">Chức Vụ</th>
-                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:center;">Ca Làm Việc</th>
-                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:center;">Trạng Thái Hiện Tại</th>
-                </tr>
-                ${personnel.map(p => `
-                    <tr>
-                        <td style="border:1px solid #cbd5e1; padding:8px; font-weight:bold;">${p.name}</td>
-                        <td style="border:1px solid #cbd5e1; padding:8px;">${p.role}</td>
-                        <td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">${p.shift}</td>
-                        <td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">${p.status}</td>
-                    </tr>
-                `).join('')}
-            </table>
-        `;
-    } else if (activeTab === 'equipment') {
-        title = "BÁO CÁO TRẠNG THÁI TRẠM MÁY";
-        const eqStats = equipments.map(eq => {
-           const { running, waiting } = getTestsForStation(eq.id);
-           const operators = [...new Set(running.map(t => t.assignedUser).filter(Boolean))].join(', ');
-           return { ...eq, runningCount: running.length, waitingCount: waiting.length, operators };
-        });
-        tableHTML = `
-            <table style="width:100%; border-collapse:collapse; font-size:11px; margin-top:15px;">
-                <tr style="background-color:#f1f5f9;">
-                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:left;">Tên Trạm Máy</th>
-                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:center;">Trạng Thái</th>
-                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:center;">Đang Chạy</th>
-                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:center;">Chờ Xử Lý</th>
-                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:left;">KTV Vận Hành</th>
-                </tr>
-                ${eqStats.map(eq => `
-                    <tr>
-                        <td style="border:1px solid #cbd5e1; padding:8px; font-weight:bold;">${eq.name}</td>
-                        <td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">
-                            ${eq.runningCount > 0 ? '<span style="color:#10b981; font-weight:bold;">ĐANG VẬN HÀNH</span>' : '<span style="color:#64748b;">TRỐNG</span>'}
-                        </td>
-                        <td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">${eq.runningCount}</td>
-                        <td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">${eq.waitingCount}</td>
-                        <td style="border:1px solid #cbd5e1; padding:8px;">${eq.operators || '-'}</td>
-                    </tr>
-                `).join('')}
-            </table>
-        `;
-    }
-
-    container.innerHTML = `
-        <div style="font-family: Arial, sans-serif; background:white; color:black; padding:20px;">
-            <h1 style="text-align:center; margin-bottom:5px; font-size:18px; color:#1e293b;">CÔNG TY / PHÒNG THÍ NGHIỆM PCCC</h1>
-            <h2 style="text-align:center; font-size:14px; color:#334155; margin-top:0;">${title}</h2>
-            <p style="text-align:right; font-size:10px; color:#64748b; margin-top:10px;">Ngày xuất: ${new Date().toLocaleDateString('vi-VN')} ${new Date().toLocaleTimeString('vi-VN')}</p>
-            ${tableHTML}
-        </div>
-    `;
-
-    const opt = {
-        margin:       10,
-        filename:     `BaoCao_${activeTab}_${getLocalYYYYMMDD(new Date())}.pdf`,
-        image:        { type: 'jpeg', quality: 0.98 },
-        html2canvas:  { scale: 2 },
-        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-    };
-    window.html2pdf().set(opt).from(container).save();
-  };
-
-  const daysInPrintMonth = new Date(printYear, printMonth, 0).getDate();
-  const printDaysArray = Array.from({length: daysInPrintMonth}, (_, i) => `${printYear}-${String(printMonth).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`);
-
-  useEffect(() => {
-    const initAuth = async () => { 
-        try { 
-            await signInAnonymously(auth); 
-        } catch (error) { 
-            console.error("Lỗi xác thực hệ thống:", error); 
-            setIsLoading(false); 
-        } 
-    };
-    initAuth();
-    
-    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser); 
-      if (!currentUser) setIsLoading(false);
-    });
-
-    const safeTimer = setTimeout(() => {
-        setIsLoading(false);
-    }, 4000);
-
-    return () => { unsubscribeAuth(); clearTimeout(safeTimer); };
-  }, []);
-
-  useEffect(() => {
-    if (!user) return;
-    const errHandler = (err) => {
-        console.warn("Lỗi đồng bộ Dữ liệu:", err.message);
-        setIsLoading(false);
-    };
-
-    const unsubPersonnel = onSnapshot(getCol('personnel'), (snap) => setPersonnel(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))), errHandler);
-    const unsubEquipments = onSnapshot(getCol('equipments'), (snap) => {
-       const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-       const core = [ { id: 'TNL-K', name: 'Tunel Khói' }, { id: 'TNL-N', name: 'Tunel Nhiệt' }, { id: 'MR', name: 'Máy Rung' }, { id: 'TNA-N', name: 'Tủ Nóng ẩm cỡ nhỏ' }, { id: 'TNA-T', name: 'Tủ Nóng ẩm cỡ trung' }, { id: 'TSO2', name: 'Tủ SO2' }, { id: 'PAS', name: 'Phòng âm thanh + ánh sáng' } ];
-       core.forEach(c => { if (!data.some(eq => eq.id === c.id)) setDoc(getDocument('equipments', c.id), c).catch(e => console.warn(e)); });
-       setEquipments(data.sort((a, b) => { if(a.id==='TSO2') return -1; if(b.id==='TSO2') return 1; return (a.name||'').localeCompare(b.name||'','vi'); }));
-    }, errHandler);
-    const unsubSamples = onSnapshot(getCol('samplesInStock'), (snap) => setSamplesInStock(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))), errHandler);
-    const unsubOrders = onSnapshot(getCol('orders'), (snap) => { setOrders(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))); setIsLoading(false); }, errHandler);
-    return () => { unsubPersonnel(); unsubSamples(); unsubEquipments(); unsubOrders(); };
-  }, [user]);
-
   const handleFileUpload = (e) => {
     const file = e.target.files[0]; if (!file) return;
-    setIsUploading(true); setErrorMessage('');
+    setIsUploading(true);
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
@@ -525,7 +418,7 @@ export default function App() {
           uploadPromises.push(setDoc(getDocument('orders', `O${ts}`), { id: `O${ts}`, reqId: clientReqIds[client], client, type, model, sampleSize: parseInt(qty, 10) || 1, deadline, urgency, tests: [] }));
         }
         await Promise.all(uploadPromises);
-      } catch (error) { setErrorMessage("Lỗi xử lý file: " + error.message); } 
+      } catch (error) { alert("Lỗi xử lý file: " + error.message); } 
       finally { setIsUploading(false); e.target.value = null; }
     };
     reader.readAsText(file);
@@ -533,7 +426,7 @@ export default function App() {
 
   const handlePersonnelFileUpload = (e) => {
     const file = e.target.files[0]; if (!file) return;
-    setIsUploadingPersonnel(true); setErrorMessage('');
+    setIsUploadingPersonnel(true);
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
@@ -550,7 +443,7 @@ export default function App() {
           uploadPromises.push(setDoc(getDocument('personnel', id), { id, name, role, shift, status: 'Đang làm', timesheet: {} }));
         }
         await Promise.all(uploadPromises); setShowAddPersonnel(false);
-      } catch (error) { setErrorMessage("Lỗi: " + error.message); } 
+      } catch (error) { alert("Lỗi: " + error.message); } 
       finally { setIsUploadingPersonnel(false); e.target.value = null; }
     };
     reader.readAsText(file);
@@ -670,66 +563,6 @@ export default function App() {
 
   const toggleShift = () => setCurrentShift(prev => prev === 'Ngày' ? 'Đêm' : 'Ngày');
 
-  // HIỆU CHỈNH: Tính năng đếm nhân sự và lọc KTV Vận Hành
-  const activeStaff = useMemo(() => personnel.filter(p => p.status === 'Đang làm' || p.status === 'Làm việc' || p.status === 'Part-time').sort((a, b) => getRoleWeight(a.role) - getRoleWeight(b.role) || (a.name||'').localeCompare(b.name||'','vi')), [personnel]);
-  const activePersonnel = useMemo(() => personnel.filter(p => p.status !== 'Đã nghỉ việc').sort((a, b) => getRoleWeight(a.role) - getRoleWeight(b.role) || (a.name||'').localeCompare(b.name||'','vi')), [personnel]);
-  
-  const operatorStaff = useMemo(() => activeStaff.filter(p => {
-     const r = String(p.role).toLowerCase();
-     return !r.includes('hành chính') && !r.includes('thư ký') && !r.includes('quản lý') && !r.includes('kế toán');
-  }), [activeStaff]);
-
-  const { countHC, countNgay, countDem } = useMemo(() => {
-    let hc = 0, ngay = 0, dem = 0;
-    activeStaff.forEach(p => {
-       const s = String(p.shift || '').toLowerCase();
-       if (s.includes('hành chính') || s === 'hc') hc++; else if (s.includes('đêm')) dem++; else ngay++; 
-    });
-    return { countHC: hc, countNgay: ngay, countDem: dem };
-  }, [activeStaff]);
-
-  const staffLocations = useMemo(() => {
-    const locs = {};
-    orders.forEach(o => o.tests?.forEach(t => {
-      if (t?.status === 'Đang chạy' && t.assignedUser && t.assignedUser !== 'Chưa phân công') {
-        if (!locs[t.assignedUser]) locs[t.assignedUser] = new Set();
-        locs[t.assignedUser].add(equipments.find(e => e.id === t.equip)?.name || t.equip);
-      }
-    }));
-    return locs;
-  }, [orders, equipments]);
-
-  // LOGIC ĐẶC QUYỀN CHỦ NHẬT (TỰ ĐỘNG TÍNH LÀ NGHỈ NẾU KHÔNG CÓ TRẠNG THÁI LÀM VIỆC CỤ THỂ TRONG NGÀY)
-  const dashboardStaff = useMemo(() => activeStaff.filter(p => {
-     const timesheetToday = p.timesheet?.[todayStr]?.status;
-     if (isTodaySunday) {
-         // Chủ nhật: Chỉ hiện trên Dashboard nếu có chấm công 'Đang làm' hoặc có thao tác đứng máy
-         return timesheetToday === 'Đang làm' || timesheetToday === 'Làm việc' || timesheetToday === 'Part-time' || (staffLocations[p.name] && staffLocations[p.name].size > 0);
-     }
-     const s = String(p.shift || 'Hành Chính').toLowerCase();
-     const isDayPerson = s.includes('hành chính') || s === 'hc' || s.includes('ngày') || s.includes('part');
-     return currentShift === 'Ngày' ? isDayPerson : (!isDayPerson || (staffLocations[p.name] && staffLocations[p.name].size > 0));
-  }), [activeStaff, currentShift, staffLocations, todayStr, isTodaySunday]);
-
-  const overdueGroups = useMemo(() => groupedOrdersArr.filter(g => g.urgency === 'Quá hạn'), [groupedOrdersArr]);
-  const urgentGroupsOnly = useMemo(() => groupedOrdersArr.filter(g => g.urgency === 'Gấp'), [groupedOrdersArr]);
-  const runningGroups = useMemo(() => groupedOrdersArr.filter(g => g.items.some(item => item.tests?.some(t => t?.status === 'Đang chạy'))), [groupedOrdersArr]);
-
-  useEffect(() => {
-      if (showAttendanceCalendar && attendanceMode === 'date') {
-          const batch = {};
-          activePersonnel.forEach(p => {
-              const status = p.timesheet?.[selectedAttendanceDate]?.status;
-              const note = p.timesheet?.[selectedAttendanceDate]?.note;
-              if (status === 'Đang làm' || status === 'Làm việc') batch[p.id] = 'V';
-              else if (status === 'Nghỉ phép' || status === 'Nghỉ' || status === 'Vắng mặt') batch[p.id] = 'X';
-              else if (status === 'Part-time') batch[p.id] = `P-${note?.match(/(\d+)/)?.[1] || '4'}`;
-              else batch[p.id] = ''; 
-          });
-          setAttendanceBatchData(batch);
-      } else if (showAttendanceCalendar && attendanceMode === 'person') setPersonBatchData({});
-  }, [showAttendanceCalendar, selectedAttendanceDate, attendanceMode, selectedAttendanceStaffId, activePersonnel]);
-
   const handleMarkStaff = (staffId, mark) => {
       setAttendanceBatchData(prev => {
           const isSameMark = prev[staffId] === mark;
@@ -773,7 +606,7 @@ export default function App() {
           });
           await Promise.all(promises); alert("Đã lưu lịch chấm công thành công!");
           setShowAttendanceCalendar(false); setPinnedTooltip(null);
-      } catch (error) { console.error(error); alert("Có lỗi xảy ra khi lưu chấm công!"); }
+      } catch (error) { alert("Có lỗi xảy ra khi lưu chấm công!"); }
   };
 
   const handleSavePersonAttendance = async () => {
@@ -792,74 +625,142 @@ export default function App() {
           if (!hasChanges) { alert("Không có thay đổi nào để lưu!"); return; }
           await updateDoc(getDocument('personnel', staff.id), { timesheet: currentTimesheet });
           alert(`Đã lưu toàn bộ các ngày cho nhân sự ${staff.name}!`); setPersonBatchData({});
-      } catch (error) { console.error(error); alert("Có lỗi xảy ra khi lưu chấm công!"); }
+      } catch (error) { alert("Có lỗi xảy ra khi lưu chấm công!"); }
   };
 
-  // =========================================================================
-  // 💻 MÀN HÌNH ĐĂNG NHẬP GIAO DIỆN HACKER / KỸ THUẬT
-  // =========================================================================
-  if (!userRole) {
-    return (
-      <div className="min-h-screen bg-[#050b14] flex flex-col items-center justify-center p-4 font-sans relative overflow-hidden bg-[linear-gradient(rgba(6,182,212,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(6,182,212,0.05)_1px,transparent_1px)] bg-[size:30px_30px]">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-cyan-600/10 rounded-full blur-[100px] pointer-events-none"></div>
-        
-        <div className="bg-[#0b1221]/90 backdrop-blur-md border border-cyan-900/50 p-10 rounded-lg shadow-[0_0_40px_rgba(6,182,212,0.15)] max-w-md w-full text-center relative z-10">
-           <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-cyan-400"></div>
-           <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-cyan-400"></div>
-           <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-cyan-400"></div>
-           <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-cyan-400"></div>
+  const handleExportPDF = () => {
+    if (!window.html2pdf) { window.print(); return; }
+    const container = document.createElement('div');
+    let title = ""; let tableHTML = "";
 
-           <div className="bg-[#050b14] border border-cyan-800 w-24 h-24 rounded-lg flex items-center justify-center mx-auto mb-6 shadow-[0_0_15px_rgba(6,182,212,0.3)]">
-             <Crosshair size={48} className="text-cyan-400" />
-           </div>
-           <h1 className="text-3xl font-black text-cyan-50 mb-1 tracking-[0.1em] font-mono">PTN-PCCC</h1>
-           <p className="text-xs font-semibold text-cyan-600 mb-8 uppercase tracking-[0.2em] font-mono">Hệ Thống Trạm Chỉ Huy</p>
-           
-           <div className="space-y-5">
-             <div className="relative">
-               <KeyRound size={20} className="absolute left-4 top-4 text-cyan-700"/>
-               <input 
-                  type="password" 
-                  placeholder="NHẬP MÃ XÁC THỰC" 
-                  value={loginPassword} 
-                  onChange={e => {setLoginPassword(e.target.value); setShowLoginError(false);}} 
-                  onKeyDown={e => e.key === 'Enter' && handleLogin()}
-                  className="w-full bg-[#050b14] border border-cyan-900/50 text-cyan-400 placeholder-cyan-900/50 pl-12 pr-4 py-4 rounded-md text-center text-xl tracking-[0.5em] focus:ring-1 focus:ring-cyan-400 focus:border-cyan-400 focus:shadow-[0_0_15px_rgba(6,182,212,0.3)] outline-none transition font-mono"
-               />
-             </div>
-             {showLoginError && <p className="text-rose-500 text-xs font-bold animate-pulse bg-rose-950/30 py-2 rounded border border-rose-900 font-mono">TỪ CHỐI TRUY CẬP. MÃ KHÔNG HỢP LỆ.</p>}
-             <button onClick={handleLogin} className="w-full bg-cyan-600/10 border border-cyan-500/50 text-cyan-400 font-bold py-4 rounded-md hover:bg-cyan-500 hover:text-slate-900 transition-all duration-300 flex items-center justify-center gap-2 font-mono tracking-widest hover:shadow-[0_0_20px_rgba(6,182,212,0.5)]">
-                XÁC THỰC <ChevronRight size={18}/>
-             </button>
-           </div>
+    if (activeTab === 'orders') {
+        title = "BÁO CÁO TRẠNG THÁI ĐƠN KIỂM ĐỊNH";
+        tableHTML = `
+            <table style="width:100%; border-collapse:collapse; font-size:11px; margin-top:15px;">
+                <tr style="background-color:#f1f5f9;">
+                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:left;">Mã Đơn</th>
+                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:left;">Khách Hàng</th>
+                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:center;">Hạn Chót</th>
+                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:center;">Mức Độ</th>
+                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:center;">Tổng TB</th>
+                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:center;">Tiến Độ</th>
+                </tr>
+                ${groupedOrdersArr.map(g => `
+                    <tr>
+                        <td style="border:1px solid #cbd5e1; padding:8px; font-weight:bold;">${g.reqId}</td>
+                        <td style="border:1px solid #cbd5e1; padding:8px;">${g.client}</td>
+                        <td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">${g.deadline}</td>
+                        <td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">${g.urgency}</td>
+                        <td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">${g.totalQty}</td>
+                        <td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">${g.progress}%</td>
+                    </tr>
+                `).join('')}
+            </table>
+        `;
+    } else if (activeTab === 'inventory') {
+        title = "BÁO CÁO KIỂM KÊ KHO THIẾT BỊ";
+        tableHTML = `
+            <table style="width:100%; border-collapse:collapse; font-size:11px; margin-top:15px;">
+                <tr style="background-color:#f1f5f9;">
+                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:left;">Khách Hàng</th>
+                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:left;">Loại TB</th>
+                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:left;">Model</th>
+                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:center;">Tồn Kho</th>
+                </tr>
+                ${samplesInStock.map(s => `
+                    <tr>
+                        <td style="border:1px solid #cbd5e1; padding:8px;">${s.client}</td>
+                        <td style="border:1px solid #cbd5e1; padding:8px;">${s.type}</td>
+                        <td style="border:1px solid #cbd5e1; padding:8px; font-weight:bold;">${s.model}</td>
+                        <td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">${s.qty}</td>
+                    </tr>
+                `).join('')}
+            </table>
+        `;
+    } else if (activeTab === 'personnel') {
+        title = "DANH SÁCH NHÂN SỰ";
+        tableHTML = `
+            <table style="width:100%; border-collapse:collapse; font-size:11px; margin-top:15px;">
+                <tr style="background-color:#f1f5f9;">
+                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:left;">Họ và Tên</th>
+                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:left;">Chức Vụ</th>
+                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:center;">Ca Làm Việc</th>
+                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:center;">Trạng Thái Hiện Tại</th>
+                </tr>
+                ${activePersonnel.map(p => {
+                    let displayStatus = p.status === 'Làm việc' ? 'Đang làm' : (p.status === 'Nghỉ' ? 'Nghỉ phép' : p.status);
+                    if (isTodaySunday && p.timesheet?.[todayStr]?.status !== 'Đang làm' && p.timesheet?.[todayStr]?.status !== 'Part-time') displayStatus = 'Nghỉ CN (Hết giờ)';
+                    else if (isTodaySunday && p.timesheet?.[todayStr]?.status === 'Đang làm') displayStatus = 'Tăng ca CN';
+                    else if (p.timesheet?.[todayStr]?.status) {
+                        const st = p.timesheet[todayStr].status;
+                        if(st === 'Part-time') displayStatus = 'Part-time (' + (p.timesheet[todayStr].note?.match(/(\d+)/)?.[1] || '4') + 'H)';
+                        else displayStatus = st;
+                    }
+                    return `
+                    <tr>
+                        <td style="border:1px solid #cbd5e1; padding:8px; font-weight:bold;">${p.name}</td>
+                        <td style="border:1px solid #cbd5e1; padding:8px;">${p.role}</td>
+                        <td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">${p.shift}</td>
+                        <td style="border:1px solid #cbd5e1; padding:8px; text-align:center; font-weight:bold;">${displayStatus}</td>
+                    </tr>
+                `}).join('')}
+            </table>
+        `;
+    } else if (activeTab === 'equipment') {
+        title = "BÁO CÁO TRẠNG THÁI TRẠM MÁY";
+        const eqStats = equipments.map(eq => {
+           const { running, waiting } = getTestsForStation(eq.id);
+           const operators = [...new Set(running.map(t => t.assignedUser).filter(Boolean))].join(', ');
+           return { ...eq, runningCount: running.length, waitingCount: waiting.length, operators };
+        });
+        tableHTML = `
+            <table style="width:100%; border-collapse:collapse; font-size:11px; margin-top:15px;">
+                <tr style="background-color:#f1f5f9;">
+                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:left;">Tên Trạm Máy</th>
+                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:center;">Trạng Thái</th>
+                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:center;">Đang Chạy</th>
+                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:center;">Chờ Xử Lý</th>
+                    <th style="border:1px solid #cbd5e1; padding:8px; text-align:left;">KTV Vận Hành</th>
+                </tr>
+                ${eqStats.map(eq => `
+                    <tr>
+                        <td style="border:1px solid #cbd5e1; padding:8px; font-weight:bold;">${eq.name}</td>
+                        <td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">
+                            ${eq.runningCount > 0 ? '<span style="color:#10b981; font-weight:bold;">ĐANG VẬN HÀNH</span>' : '<span style="color:#64748b;">TRỐNG</span>'}
+                        </td>
+                        <td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">${eq.runningCount}</td>
+                        <td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">${eq.waitingCount}</td>
+                        <td style="border:1px solid #cbd5e1; padding:8px;">${eq.operators || '-'}</td>
+                    </tr>
+                `).join('')}
+            </table>
+        `;
+    }
+
+    container.innerHTML = `
+        <div style="font-family: Arial, sans-serif; background:white; color:black; padding:20px;">
+            <h1 style="text-align:center; margin-bottom:5px; font-size:18px; color:#1e293b;">CÔNG TY / PHÒNG THÍ NGHIỆM PCCC</h1>
+            <h2 style="text-align:center; font-size:14px; color:#334155; margin-top:0;">${title}</h2>
+            <p style="text-align:right; font-size:10px; color:#64748b; margin-top:10px;">Ngày xuất: ${new Date().toLocaleDateString('vi-VN')} ${new Date().toLocaleTimeString('vi-VN')}</p>
+            ${tableHTML}
         </div>
-        <p className="text-[10px] text-cyan-900 mt-8 relative z-10 font-mono tracking-widest">
-           QUẢN TRỊ VIÊN: 9299 | QUẢN LÝ: 6789 | KIỂM THỬ: 3333
-        </p>
-      </div>
-    );
-  }
+    `;
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-[#050b14]">
-        <Loader2 size={40} className="text-cyan-500 animate-spin mb-4" />
-        <p className="text-cyan-600 font-mono tracking-[0.2em] uppercase text-xs animate-pulse">Đang kết nối đến CSDL PCCC...</p>
-      </div>
-    );
-  }
+    const opt = { margin: 10, filename: `BaoCao_${activeTab}_${getLocalYYYYMMDD(new Date())}.pdf`, image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } };
+    window.html2pdf().set(opt).from(container).save();
+  };
 
-  // =========================================================================
-  // 💻 MAIN LAYOUT CHUYÊN NGHIỆP CÔNG NGHỆ CAO
-  // =========================================================================
-  const renderMonthlyPrintContent = () => {
+  const handleMonthlyPrintHtml2Pdf = () => {
+    if (!window.html2pdf) { window.print(); setIsPrintingMonthly(false); setShowPrintModal(false); return; }
+    setIsPrintingMonthly(true);
+    
     let tableRows = activePersonnel.map((p, index) => {
         let totalCong = 0; const notes = [];
         const cells = printDaysArray.map(dateStr => {
             const dayData = p.timesheet?.[dateStr];
             const status = dayData?.status;
             let mark = '';
-            // TỰ ĐỘNG CHẤM CÔNG CHỦ NHẬT KHI LÊN PDF
+            
             if (status === 'Đang làm' || status === 'Làm việc') { 
                 mark = isSundayStr(dateStr) ? 'TC' : 'X'; 
                 totalCong += 1; 
@@ -867,12 +768,12 @@ export default function App() {
             else if (status === 'Nghỉ phép' || status === 'Nghỉ') mark = 'P';
             else if (status === 'Part-time') { mark = 'Ca'; totalCong += 0.5; }
             else if (status === 'Vắng mặt' || status === 'Nghỉ không phép') mark = 'V';
-            else if (isSundayStr(dateStr)) mark = '-'; // Mặc định Chủ Nhật là nghỉ
+            else if (isSundayStr(dateStr)) mark = '-'; 
             
             if (dayData?.note) notes.push(`Ngày ${dateStr.split('-')[2]}: ${dayData.note}`);
             
             let cellColor = isSundayStr(dateStr) ? 'background-color:#f8fafc;' : '';
-            if (mark === 'TC') cellColor += 'color:#10b981;'; // Bôi xanh nếu tăng ca Chủ nhật
+            if (mark === 'TC') cellColor += 'color:#10b981;'; 
             return `<td style="border:1px solid #000; padding:2px; text-align:center; font-weight:bold; ${cellColor}">${mark}</td>`;
         }).join('');
         return `
@@ -892,7 +793,7 @@ export default function App() {
         return `<th style="border:1px solid #000; padding:2px; width:15px; ${isSun ? 'background-color:#fee2e2; color:#be123c;' : ''}">${i + 1}</th>`;
     }).join('');
 
-    return `
+    const htmlContent = `
         <div style="font-family: Arial, sans-serif; background:white; color:black; padding:20px;">
             <h1 style="text-align:center; font-size:18px; margin-bottom:5px;">CÔNG TY / PHÒNG THÍ NGHIỆM PCCC</h1>
             <h2 style="text-align:center; font-size:14px; margin-top:0;">BẢNG CHẤM CÔNG THÁNG ${printMonth}/${printYear}</h2>
@@ -915,54 +816,60 @@ export default function App() {
             </div>
         </div>
     `;
-  };
 
-  const handleMonthlyPrintHtml2Pdf = () => {
-    if (!window.html2pdf) { 
-        window.print();
-        setIsPrintingMonthly(false);
-        setShowPrintModal(false);
-        return; 
-    }
-    
-    setIsPrintingMonthly(true);
     const container = document.createElement('div');
-    container.innerHTML = renderMonthlyPrintContent();
-
-    const opt = {
-        margin:       5,
-        filename:     `BangChamCong_T${printMonth}_${printYear}.pdf`,
-        image:        { type: 'jpeg', quality: 0.98 },
-        html2canvas:  { scale: 2 },
-        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'landscape' }
-    };
-    window.html2pdf().set(opt).from(container).save().then(() => {
-        setIsPrintingMonthly(false);
-        setShowPrintModal(false);
-    });
+    container.innerHTML = htmlContent;
+    const opt = { margin: 5, filename: `BangChamCong_T${printMonth}_${printYear}.pdf`, image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' } };
+    window.html2pdf().set(opt).from(container).save().then(() => { setIsPrintingMonthly(false); setShowPrintModal(false); });
   };
 
+  // =========================================================================
+  // GIAO DIỆN ĐĂNG NHẬP / MÀN HÌNH CHỜ
+  // =========================================================================
+  if (!userRole) {
+    return (
+      <div className="min-h-screen bg-[#050b14] flex flex-col items-center justify-center p-4 font-sans relative overflow-hidden bg-[linear-gradient(rgba(6,182,212,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(6,182,212,0.05)_1px,transparent_1px)] bg-[size:30px_30px]">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-cyan-600/10 rounded-full blur-[100px] pointer-events-none"></div>
+        <div className="bg-[#0b1221]/90 backdrop-blur-md border border-cyan-900/50 p-10 rounded-lg shadow-[0_0_40px_rgba(6,182,212,0.15)] max-w-md w-full text-center relative z-10">
+           <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-cyan-400"></div>
+           <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-cyan-400"></div>
+           <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-cyan-400"></div>
+           <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-cyan-400"></div>
+           <div className="bg-[#050b14] border border-cyan-800 w-24 h-24 rounded-lg flex items-center justify-center mx-auto mb-6 shadow-[0_0_15px_rgba(6,182,212,0.3)]"><Crosshair size={48} className="text-cyan-400" /></div>
+           <h1 className="text-3xl font-black text-cyan-50 mb-1 tracking-[0.1em] font-mono">PTN-PCCC</h1>
+           <p className="text-xs font-semibold text-cyan-600 mb-8 uppercase tracking-[0.2em] font-mono">Hệ Thống Trạm Chỉ Huy</p>
+           <div className="space-y-5">
+             <div className="relative">
+               <KeyRound size={20} className="absolute left-4 top-4 text-cyan-700"/>
+               <input type="password" placeholder="NHẬP MÃ XÁC THỰC" value={loginPassword} onChange={e => {setLoginPassword(e.target.value); setShowLoginError(false);}} onKeyDown={e => e.key === 'Enter' && handleLogin()} className="w-full bg-[#050b14] border border-cyan-900/50 text-cyan-400 placeholder-cyan-900/50 pl-12 pr-4 py-4 rounded-md text-center text-xl tracking-[0.5em] focus:ring-1 focus:ring-cyan-400 focus:border-cyan-400 focus:shadow-[0_0_15px_rgba(6,182,212,0.3)] outline-none transition font-mono"/>
+             </div>
+             {showLoginError && <p className="text-rose-500 text-xs font-bold animate-pulse bg-rose-950/30 py-2 rounded border border-rose-900 font-mono">TỪ CHỐI TRUY CẬP. MÃ KHÔNG HỢP LỆ.</p>}
+             <button onClick={handleLogin} className="w-full bg-cyan-600/10 border border-cyan-500/50 text-cyan-400 font-bold py-4 rounded-md hover:bg-cyan-500 hover:text-slate-900 transition-all duration-300 flex items-center justify-center gap-2 font-mono tracking-widest hover:shadow-[0_0_20px_rgba(6,182,212,0.5)]">XÁC THỰC <ChevronRight size={18}/></button>
+           </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#050b14]">
+        <Loader2 size={40} className="text-cyan-500 animate-spin mb-4" />
+        <p className="text-cyan-600 font-mono tracking-[0.2em] uppercase text-xs animate-pulse">Đang kết nối đến CSDL PCCC...</p>
+      </div>
+    );
+  }
+
+  // =========================================================================
+  // GIAO DIỆN CHÍNH
+  // =========================================================================
   return (
     <>
-    <style dangerouslySetInnerHTML={{__html: `
-      .custom-scrollbar::-webkit-scrollbar { width: 6px; }
-      .custom-scrollbar::-webkit-scrollbar-track { background: #050b14; }
-      .custom-scrollbar::-webkit-scrollbar-thumb { background: #164e63; border-radius: 4px; }
-      .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #0891b2; }
-      @media print {
-        @page { size: landscape; margin: 10mm; }
-        body, main, div { background: white !important; color: black !important; border-color: #ccc !important; box-shadow: none !important; text-shadow: none !important; }
-        .print\\:hidden { display: none !important; }
-        .print\\:block { display: block !important; }
-        .print\\:text-black { color: black !important; }
-        .print\\:border-black { border-color: black !important; }
-        * { color: black !important; }
-      }
-    `}} />
+    <style dangerouslySetInnerHTML={{__html: `.custom-scrollbar::-webkit-scrollbar { width: 6px; } .custom-scrollbar::-webkit-scrollbar-track { background: #050b14; } .custom-scrollbar::-webkit-scrollbar-thumb { background: #164e63; border-radius: 4px; } .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #0891b2; }`}} />
 
     {/* MODAL CẤU HÌNH IN PDF THÁNG */}
     {showPrintModal && (
-        <div className="fixed inset-0 bg-[#050b14]/90 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-[#050b14]/90 z-[200] flex items-center justify-center p-4">
             <div className="bg-[#0b1221] border border-cyan-800 p-6 rounded-md shadow-[0_0_20px_rgba(6,182,212,0.2)] w-full max-w-sm">
                 <h2 className="text-cyan-400 font-bold font-mono mb-4 text-center tracking-widest">CẤU_HÌNH_XUẤT_PDF</h2>
                 <div className="flex gap-4 mb-6">
@@ -983,10 +890,201 @@ export default function App() {
         </div>
     )}
 
-    {/* BẢNG CHẤM CÔNG THÁNG (CHỈ HIỆN KHI IN THÔNG THƯỜNG) */}
-    <div className={`hidden ${isPrintingMonthly ? 'print:block' : ''} bg-white w-full text-black font-sans`} dangerouslySetInnerHTML={{ __html: renderMonthlyPrintContent() }}></div>
+    {/* MODAL LỊCH CHẤM CÔNG HÀNG LOẠT (Z-INDEX CAO NHẤT ĐỂ KHÔNG BỊ MENU CHE) */}
+    {showAttendanceCalendar && isSuperAdmin && (() => {
+        const year = attendanceViewDate.getFullYear(); const month = attendanceViewDate.getMonth();
+        const daysInMonth = new Date(year, month + 1, 0).getDate(); const firstDay = new Date(year, month, 1).getDay();
+        const startOffset = firstDay === 0 ? 6 : firstDay - 1; 
+        const calendarDays = [];
+        for (let i = 0; i < startOffset; i++) calendarDays.push(null);
+        for (let i = 1; i <= daysInMonth; i++) calendarDays.push(getLocalYYYYMMDD(new Date(year, month, i)));
 
-    <div className={`flex h-screen w-full bg-[#050b14] font-sans overflow-hidden text-slate-300 selection:bg-cyan-900 selection:text-cyan-100 bg-[linear-gradient(rgba(6,182,212,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(6,182,212,0.03)_1px,transparent_1px)] bg-[size:40px_40px] ${isPrintingMonthly ? 'print:hidden' : ''}`}>
+        return (
+       <div className="fixed inset-0 bg-[#050b14]/95 backdrop-blur-md z-[100] flex flex-col w-full h-full overflow-hidden animate-in fade-in">
+          <div className="bg-[#0b1221] flex justify-between items-center p-4 border-b border-cyan-900/50 shrink-0">
+              <div className="flex items-center gap-3">
+                  <CalendarCheck size={24} className="text-cyan-500"/>
+                  <h2 className="text-xl font-black text-cyan-50 tracking-widest font-mono">QUẢN_LÝ_CHẤM_CÔNG</h2>
+              </div>
+              <button onClick={() => { setShowAttendanceCalendar(false); setPinnedTooltip(null); }} className="px-4 py-1.5 bg-rose-900/30 border border-rose-800 text-rose-500 text-[10px] tracking-widest font-bold rounded hover:bg-rose-900 font-mono">ĐÓNG</button>
+          </div>
+
+          <div className="flex flex-col md:flex-row flex-1 overflow-hidden bg-[#050b14]">
+              {/* Cột trái */}
+              <div className="w-full md:w-64 lg:w-80 bg-[#0b1221] border-b md:border-b-0 md:border-r border-cyan-900/50 flex flex-col z-10 shrink-0 h-1/2 md:h-full font-mono">
+                  <div className="flex bg-[#050b14] p-1 m-3 rounded border border-slate-800 shrink-0">
+                      <button onClick={() => setAttendanceMode('date')} className={`flex-1 py-1.5 text-[9px] font-bold tracking-widest rounded transition-colors ${attendanceMode === 'date' ? 'bg-cyan-900/50 text-cyan-300' : 'text-slate-600 hover:text-slate-400'}`}>THEO_NGÀY</button>
+                      <button onClick={() => { setAttendanceMode('person'); if (!selectedAttendanceStaffId && activePersonnel.length > 0) setSelectedAttendanceStaffId(activePersonnel[0].id); }} className={`flex-1 py-1.5 text-[9px] font-bold tracking-widest rounded transition-colors ${attendanceMode === 'person' ? 'bg-cyan-900/50 text-cyan-300' : 'text-slate-600 hover:text-slate-400'}`}>THEO_NGƯỜI</button>
+                  </div>
+
+                  {attendanceMode === 'date' ? (
+                      <>
+                          <div className="p-3 bg-cyan-950/10 border-y border-cyan-900/30 text-center shrink-0">
+                              <input type="date" value={selectedAttendanceDate} onChange={(e) => setSelectedAttendanceDate(e.target.value)} className="w-full text-center bg-[#050b14] border border-cyan-800 text-cyan-400 rounded p-1.5 text-xs outline-none cursor-pointer"/>
+                          </div>
+                          <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
+                              {activePersonnel.map(p => {
+                                  const mark = attendanceBatchData[p.id] || '';
+                                  return (
+                                      <div key={p.id} className="flex justify-between items-center p-2 border-b border-slate-800 gap-2">
+                                          <span className="font-semibold text-[10px] text-slate-300 truncate flex-1">{p.name}</span>
+                                          <div className="flex gap-1 shrink-0 items-center">
+                                              <button onClick={() => handleMarkStaff(p.id, 'V')} className={`w-6 h-6 rounded text-[10px] font-black flex items-center justify-center transition-all border ${mark === 'V' ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' : 'bg-transparent border-slate-700 text-slate-600 hover:border-emerald-900 hover:text-emerald-700'}`}>V</button>
+                                              <button onClick={() => handleMarkStaff(p.id, 'X')} className={`w-6 h-6 rounded text-[10px] font-black flex items-center justify-center transition-all border ${mark === 'X' ? 'bg-rose-500/20 border-rose-500 text-rose-400' : 'bg-transparent border-slate-700 text-slate-600 hover:border-rose-900 hover:text-rose-700'}`}>X</button>
+                                              <button onClick={() => handleMarkStaff(p.id, mark.startsWith('P') ? '' : 'P-4')} className={`w-6 h-6 rounded text-[9px] font-black flex items-center justify-center transition-all border ${mark.startsWith('P') ? 'bg-amber-500/20 border-amber-500 text-amber-400' : 'bg-transparent border-slate-700 text-slate-600 hover:border-amber-900 hover:text-amber-700'}`}>P</button>
+                                              {mark.startsWith('P') && (
+                                                  <select value={mark.split('-')[1]} onChange={(e) => handleMarkStaff(p.id, `P-${e.target.value}`)} className="w-10 h-6 text-[9px] border border-amber-800 rounded bg-[#050b14] text-center text-amber-400 appearance-none px-0.5 outline-none">
+                                                      {[1,2,3,4,5,6,7,8].map(h => <option key={h} value={h}>{h} GIỜ</option>)}
+                                                  </select>
+                                              )}
+                                          </div>
+                                      </div>
+                                  );
+                              })}
+                          </div>
+                          <div className="p-3 bg-[#0b1221] border-t border-cyan-900/50 mt-auto shrink-0">
+                              <button onClick={() => handleSaveBatchAttendance()} className="w-full py-2 bg-cyan-600/20 border border-cyan-500 text-cyan-400 text-[10px] font-bold tracking-widest rounded hover:bg-cyan-600 hover:text-black transition">LƯU_DỮ_LIỆU</button>
+                          </div>
+                      </>
+                  ) : (
+                      <>
+                          <div className="p-3 bg-cyan-950/10 border-y border-cyan-900/30 text-center shrink-0">
+                              <div className="text-xs text-cyan-400 bg-[#050b14] border border-cyan-800 rounded p-1.5 truncate">
+                                  {activePersonnel.find(p => p.id === selectedAttendanceStaffId)?.name || 'CHƯA_CHỌN'}
+                              </div>
+                          </div>
+                          <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
+                              {activePersonnel.map(p => (
+                                  <button key={p.id} onClick={() => { setSelectedAttendanceStaffId(p.id); setPersonBatchData({}); }} className={`w-full text-left flex justify-between items-center p-2.5 mb-1 border rounded transition-all ${selectedAttendanceStaffId === p.id ? 'bg-cyan-900/30 border-cyan-500 text-cyan-300' : 'bg-transparent border-slate-800 text-slate-500 hover:border-slate-600'}`}>
+                                      <span className="font-semibold text-[10px] truncate">{p.name}</span>
+                                      {selectedAttendanceStaffId === p.id && <ChevronRight size={14} className="text-cyan-500"/>}
+                                  </button>
+                              ))}
+                          </div>
+                          <div className="p-3 bg-[#0b1221] border-t border-cyan-900/50 mt-auto shrink-0">
+                              <button onClick={() => handleSavePersonAttendance()} className="w-full py-2 bg-cyan-600/20 border border-cyan-500 text-cyan-400 text-[10px] font-bold tracking-widest rounded hover:bg-cyan-600 hover:text-black transition">LƯU_DỮ_LIỆU_NHÂN_SỰ</button>
+                          </div>
+                      </>
+                  )}
+              </div>
+
+              {/* Cột phải: Lịch */}
+              <div className="flex-1 p-4 lg:p-6 flex flex-col bg-[#050b14] overflow-y-auto custom-scrollbar">
+                  <div className="flex justify-between items-center mb-4 bg-[#0b1221] p-2 rounded border border-slate-800 shrink-0 font-mono">
+                      <div className="flex gap-1">
+                          <button onClick={() => setAttendanceViewDate(new Date(year - 1, month, 1))} className="p-1.5 text-slate-500 hover:text-cyan-400 rounded"><ChevronsLeft size={16}/></button>
+                          <button onClick={() => setAttendanceViewDate(new Date(year, month - 1, 1))} className="p-1.5 text-slate-500 hover:text-cyan-400 rounded"><ChevronLeft size={16}/></button>
+                      </div>
+                      <h3 className="text-sm font-black text-slate-300 tracking-widest">T{month + 1} // {year}</h3>
+                      <div className="flex gap-1">
+                          <button onClick={() => setAttendanceViewDate(new Date(year, month + 1, 1))} className="p-1.5 text-slate-500 hover:text-cyan-400 rounded"><ChevronRight size={16}/></button>
+                          <button onClick={() => setAttendanceViewDate(new Date(year + 1, month, 1))} className="p-1.5 text-slate-500 hover:text-cyan-400 rounded"><ChevronsRight size={16}/></button>
+                      </div>
+                  </div>
+
+                  <div className="grid grid-cols-7 gap-2 mb-2 text-center shrink-0">
+                      {['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'].map(day => (<div key={day} className="text-[10px] font-black text-slate-600 font-mono">{day}</div>))}
+                  </div>
+                  
+                  <div className="grid grid-cols-7 gap-2 flex-1 auto-rows-max font-mono">
+                      {calendarDays.map((dateStr, idx) => {
+                          if (!dateStr) return <div key={`empty-${idx}`}></div>;
+                          const isTodayLocal = dateStr === getLocalYYYYMMDD(new Date());
+                          const dayNum = parseInt(dateStr.split('-')[2], 10);
+                          
+                          if (attendanceMode === 'date') {
+                              const isSelected = dateStr === selectedAttendanceDate;
+                              let hasWorking = false; let absentees = []; let partTimers = [];
+                              activePersonnel.forEach(p => {
+                                  const st = p.timesheet?.[dateStr]?.status; const nt = p.timesheet?.[dateStr]?.note;
+                                  if (st === 'Nghỉ phép' || st === 'Nghỉ' || st === 'Vắng mặt') absentees.push({ name: p.name, note: nt || 'NGHỈ' });
+                                  else if (st === 'Đang làm' || st === 'Làm việc') hasWorking = true;
+                                  else if (st === 'Part-time') { hasWorking = true; partTimers.push({ name: p.name, note: nt || 'LÀM THEO CA' }); }
+                              });
+
+                              let circleClass = "border-slate-800 bg-[#0b1221] text-slate-500";
+                              if (absentees.length > 0) circleClass = "bg-rose-950/50 border-rose-500 text-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.3)]"; 
+                              else if (hasWorking) circleClass = "bg-emerald-950/50 border-emerald-500 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.2)]"; 
+
+                              if (isSelected) circleClass += " ring-2 ring-cyan-500 scale-110 z-10";
+
+                              const rowIndex = Math.floor(idx / 7); const colIndex = idx % 7; 
+                              const isPinned = pinnedTooltip === dateStr;
+                              const isTop = rowIndex <= 2;
+                              const tooltipStyle = { zIndex: 9999, ...(isTop ? { top: 'calc(100% + 8px)' } : { bottom: 'calc(100% + 8px)' }), ...(colIndex <= 1 ? { left: '0' } : colIndex >= 5 ? { right: '0' } : { left: '50%', transform: 'translateX(-50%)' }) };
+
+                              return (
+                                  <div key={dateStr} className={`relative group flex justify-center py-1 h-full z-0 ${isPinned ? 'z-50' : 'hover:z-50 focus-within:z-50'}`}>
+                                      <button onClick={() => { setSelectedAttendanceDate(dateStr); setPinnedTooltip((absentees.length>0||partTimers.length>0) && pinnedTooltip!==dateStr ? dateStr : null); }} className={`w-10 h-10 rounded flex flex-col items-center justify-center transition-all border ${circleClass}`}>
+                                          <span className="text-sm">{dayNum}</span>
+                                          {isTodayLocal && <span className="absolute bottom-1 w-4 h-0.5 bg-cyan-500"></span>}
+                                      </button>
+                                      
+                                      {(absentees.length > 0 || partTimers.length > 0) && (
+                                          <div onClick={(e) => e.stopPropagation()} style={tooltipStyle} className={`absolute ${isPinned ? 'flex' : 'hidden group-hover:flex'} flex-col w-48 bg-[#0b1221] border border-cyan-900 text-white rounded shadow-2xl overflow-hidden animate-in fade-in`}>
+                                              {absentees.length > 0 && (
+                                                  <>
+                                                      <div className="bg-rose-950/80 text-rose-400 font-bold flex justify-between px-2 py-1.5 text-[9px] border-b border-rose-900">
+                                                          <span>VẮNG_MẶT ({absentees.length})</span>
+                                                          {isPinned ? <button onClick={() => setPinnedTooltip(null)} className="hover:text-white"><X size={12}/></button> : <span className="opacity-50">(GHIM)</span>}
+                                                      </div>
+                                                      <div className="p-1.5 space-y-1 max-h-32 overflow-y-auto custom-scrollbar">
+                                                          {absentees.map((a, i) => (<div key={i} className="flex justify-between border-b border-slate-800 pb-1 text-[9px]"><span className="text-rose-200">{a.name}</span><span className="text-slate-500">{a.note}</span></div>))}
+                                                      </div>
+                                                  </>
+                                              )}
+                                              {partTimers.length > 0 && (
+                                                  <>
+                                                      <div className="bg-amber-950/80 text-amber-400 font-bold flex justify-between px-2 py-1.5 text-[9px] border-b border-amber-900 border-t border-t-amber-900">
+                                                          <span>LÀM_THEO_CA ({partTimers.length})</span>
+                                                          {isPinned && absentees.length === 0 && <button onClick={() => setPinnedTooltip(null)} className="hover:text-white"><X size={12}/></button>}
+                                                      </div>
+                                                      <div className="p-1.5 space-y-1 max-h-32 overflow-y-auto custom-scrollbar">
+                                                          {partTimers.map((a, i) => (<div key={i} className="flex justify-between border-b border-slate-800 pb-1 text-[9px]"><span className="text-amber-200">{a.name}</span><span className="text-slate-500">{a.note}</span></div>))}
+                                                      </div>
+                                                  </>
+                                              )}
+                                          </div>
+                                      )}
+                                  </div>
+                              );
+                          } else {
+                              const staff = activePersonnel.find(p => p.id === selectedAttendanceStaffId);
+                              const mark = personBatchData[dateStr] !== undefined ? personBatchData[dateStr] : (() => {
+                                      const st = staff?.timesheet?.[dateStr]?.status; const nt = staff?.timesheet?.[dateStr]?.note;
+                                      if (st === 'Đang làm' || st === 'Làm việc') return 'V'; if (st === 'Nghỉ phép' || st === 'Nghỉ' || st === 'Vắng mặt') return 'X';
+                                      if (st === 'Part-time') return `P-${nt?.match(/(\d+)/)?.[1] || '4'}`; return '';
+                                  })();
+                              
+                              let circleClass = "border-slate-800 bg-[#0b1221] text-slate-500";
+                              if (mark === 'V') circleClass = "bg-emerald-950/50 border-emerald-500 text-emerald-400";
+                              if (mark === 'X') circleClass = "bg-rose-950/50 border-rose-500 text-rose-400";
+                              if (mark?.startsWith('P')) circleClass = "bg-amber-950/50 border-amber-500 text-amber-400";
+
+                              return (
+                                  <div key={dateStr} className="relative flex justify-center py-1 h-full z-0 hover:z-10 focus-within:z-10">
+                                      <button onClick={() => handleTogglePersonDay(dateStr)} className={`w-10 h-10 rounded flex flex-col items-center justify-center transition-all border ${circleClass}`}>
+                                          <span className="text-sm">{dayNum}</span>
+                                          {isTodayLocal && <span className={`absolute bottom-1 w-4 h-0.5 ${mark ? 'bg-white' : 'bg-cyan-500'}`}></span>}
+                                      </button>
+                                      {mark?.startsWith('P') && (
+                                          <div className="absolute top-full mt-1 z-50 animate-in fade-in" onClick={(e) => e.stopPropagation()}>
+                                              <select value={mark.split('-')[1]} onChange={(e) => setPersonBatchData(prev => ({ ...prev, [dateStr]: `P-${e.target.value}` }))} className="p-0.5 text-[9px] border border-amber-500 bg-[#050b14] text-amber-400 text-center outline-none">
+                                                  {[1,2,3,4,5,6,7,8].map(h => <option key={h} value={h}>{h} GIỜ</option>)}
+                                              </select>
+                                          </div>
+                                      )}
+                                  </div>
+                              );
+                          }
+                      })}
+                  </div>
+              </div>
+          </div>
+       </div>
+    )})()}
+
+    <div className={`flex h-screen w-full bg-[#050b14] font-sans overflow-hidden text-slate-300 selection:bg-cyan-900 selection:text-cyan-100 bg-[linear-gradient(rgba(6,182,212,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(6,182,212,0.03)_1px,transparent_1px)] bg-[size:40px_40px]`}>
       
       {/* 💻 SIDEBAR KỸ THUẬT */}
       <aside className="hidden md:flex flex-col w-60 bg-[#0b1221]/90 backdrop-blur-md z-20 border-r border-cyan-900/50 transition-all duration-300 shadow-[5px_0_25px_rgba(0,0,0,0.5)]">
@@ -1001,7 +1099,7 @@ export default function App() {
           </div>
         </div>
         
-        <div className="px-4 py-6">
+        <div className="px-4 py-6 overflow-y-auto">
            <p className="text-[10px] font-bold text-cyan-800 uppercase tracking-[0.2em] mb-4 pl-2 font-mono">Các Phân Hệ</p>
            <nav className="space-y-2">
              {navItems.map(item => {
@@ -1032,10 +1130,10 @@ export default function App() {
       </aside>
 
       {/* 📱 KHU VỰC MAIN CONTENT */}
-      <div className="flex-1 flex flex-col h-screen overflow-hidden relative z-10">
+      <div className="flex-1 flex flex-col h-screen overflow-hidden relative z-10 w-full">
         
         {/* HEADER CÔNG NGHỆ */}
-        <header className="bg-[#0b1221]/80 backdrop-blur-md text-slate-200 h-16 px-6 lg:px-8 border-b border-cyan-900/50 z-10 flex justify-between items-center shadow-md">
+        <header className="bg-[#0b1221]/80 backdrop-blur-md text-slate-200 h-16 px-4 md:px-6 lg:px-8 border-b border-cyan-900/50 z-10 flex justify-between items-center shadow-md">
           <div className="flex items-center gap-4">
              <h2 className="text-xl font-bold tracking-widest text-cyan-50 capitalize hidden md:block font-mono">
                {navItems.find(i => i.id === activeTab)?.label}
@@ -1046,26 +1144,26 @@ export default function App() {
              </div>
           </div>
           
-          <div className="flex items-center gap-4 lg:gap-6 font-mono">
+          <div className="flex items-center gap-3 md:gap-6 font-mono">
              <div className="h-6 w-px bg-cyan-900/50 hidden md:block"></div>
              <div className="flex flex-col text-right">
                 <div className="text-sm font-black text-cyan-400">{currentTime.toLocaleTimeString('vi-VN')}</div>
                 <div className="text-[9px] text-cyan-700 uppercase font-bold tracking-[0.2em]">{currentTime.toLocaleDateString('vi-VN')}</div>
              </div>
-             <div className="flex items-center gap-2 bg-[#050b14] px-3 py-1.5 rounded border border-cyan-900/50 shadow-inner cursor-pointer hover:border-cyan-500/50 transition" onClick={toggleShift}>
+             <div className="flex items-center gap-2 bg-[#050b14] px-2 md:px-3 py-1.5 rounded border border-cyan-900/50 shadow-inner cursor-pointer hover:border-cyan-500/50 transition" onClick={toggleShift}>
                 {currentShift === 'Ngày' ? <Sun size={14} className="text-amber-500"/> : <Moon size={14} className="text-indigo-400"/>}
-                <span className="text-xs font-bold text-slate-300 hidden sm:block tracking-wider">CA LÀM: {currentShift.toUpperCase()}</span>
+                <span className="text-[10px] md:text-xs font-bold text-slate-300 hidden sm:block tracking-wider">CA LÀM: {currentShift.toUpperCase()}</span>
              </div>
              <button onClick={handleLogout} className="md:hidden p-1.5 bg-[#050b14] border border-cyan-900 text-rose-500 rounded"><LogOut size={16}/></button>
           </div>
         </header>
 
-        {/* NỘI DUNG CHÍNH */}
-        <main className="flex-1 p-4 md:p-6 lg:p-8 overflow-y-auto pb-24 md:pb-8 scroll-smooth">
+        {/* NỘI DUNG CHÍNH TRÀN VIỀN */}
+        <main className="flex-1 p-3 md:p-6 overflow-y-auto pb-24 md:pb-8 scroll-smooth w-full">
           
           {/* TAB 1: DASHBOARD */}
           {activeTab === 'dashboard' && (
-            <div className="space-y-6 max-w-7xl mx-auto">
+            <div className="space-y-6 w-full">
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                  <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div onClick={() => {setOrderModalFilter('Quá hạn'); setShowOrderModal(true);}} className="cursor-pointer bg-[#0b1221] p-6 rounded-md border border-rose-900 hover:border-rose-500/80 hover:shadow-[0_0_20px_rgba(244,63,94,0.2)] transition-all flex flex-col justify-center items-center text-center relative overflow-hidden h-full group">
@@ -1110,7 +1208,7 @@ export default function App() {
                          {groupedOrdersArr.length === 0 && <p className="text-xs font-mono text-slate-600 text-center py-4">KHÔNG CÓ DỮ LIỆU.</p>}
                          {groupedOrdersArr.map(group => {
                             const typeCounts = {};
-                            group.items.forEach(item => { const cat = categorizeDevice(item.type); typeCounts[cat] = (typeCounts[cat] || 0) + (item.sampleSize || 1); });
+                            group.items.forEach(item => { const cat = categorizeDevice(item.type); typeCounts[cat] = (typeCounts[cat] || 0) + (Number(item.sampleSize) || 1); });
                             return (
                                <div key={group.groupId} className="border border-slate-800 rounded bg-[#050b14]/50 p-4 transition hover:border-cyan-800 hover:bg-cyan-950/10">
                                   <div className="flex justify-between items-center border-b border-slate-800 pb-2 mb-3">
@@ -1189,8 +1287,8 @@ export default function App() {
 
           {/* TAB 2: QUẢN LÝ ĐƠN HÀNG */}
           {activeTab === 'orders' && (
-            <div className="max-w-7xl mx-auto flex flex-col h-full print:block">
-              <div className="flex flex-col md:flex-row gap-3 mb-4 print:hidden">
+            <div className="w-full flex flex-col h-full">
+              <div className="flex flex-col md:flex-row gap-3 mb-4">
                  <div className="relative flex-1">
                     <input type="text" placeholder="TÌM KHÁCH HÀNG, MODEL, MÃ..." value={orderSearchTerm} onChange={(e) => setOrderSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 rounded-md bg-[#050b14] border border-cyan-900/50 text-cyan-400 placeholder-cyan-900/50 focus:outline-none focus:border-cyan-400 font-mono text-xs"/>
                     <Search size={16} className="absolute left-3 top-3 text-cyan-700" />
@@ -1203,7 +1301,7 @@ export default function App() {
               </div>
 
               {showAddOrder && isSuperAdmin && (
-                 <div className="bg-[#0b1221] p-4 lg:p-6 rounded-md border border-cyan-800 shadow-md mb-6 animate-in slide-in-from-top-4 print:hidden font-mono">
+                 <div className="bg-[#0b1221] p-4 lg:p-6 rounded-md border border-cyan-800 shadow-md mb-6 animate-in slide-in-from-top-4 font-mono">
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-4 font-mono">
                         <input type="text" placeholder="Khách hàng..." value={newOrderData.client} onChange={e => setNewOrderData({...newOrderData, client: e.target.value})} className="bg-[#050b14] border border-cyan-900/50 p-2.5 rounded text-xs text-cyan-400 focus:border-cyan-400 outline-none" />
                         <input type="text" placeholder="Model thiết bị..." value={newOrderData.model} onChange={e => setNewOrderData({...newOrderData, model: e.target.value})} className="bg-[#050b14] border border-cyan-900/50 p-2.5 rounded text-xs text-cyan-400 focus:border-cyan-400 outline-none" />
@@ -1223,44 +1321,44 @@ export default function App() {
                  </div>
               )}
 
-              <div className="flex-1 overflow-y-auto space-y-4 print:space-y-6 print:overflow-visible pb-10 custom-scrollbar print:text-black">
+              <div className="flex-1 overflow-y-auto space-y-4 pb-10 custom-scrollbar">
                  {groupedOrdersArr.length === 0 && <p className="text-center text-slate-500 font-mono mt-10">KHÔNG CÓ DỮ LIỆU.</p>}
-                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 print:grid-cols-1 print:gap-4 print:text-black">
+                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">
                    {groupedOrdersArr.map(group => {
                      const itemsByType = {};
                      group.items.forEach(item => { if(!itemsByType[item.type]) itemsByType[item.type] = []; itemsByType[item.type].push(item); });
                      let borderColor = group.urgency === 'Gấp' || group.urgency === 'Quá hạn' ? 'border-rose-900/50 bg-[#0b1221]' : (group.urgency === 'Mới' ? 'border-emerald-900/50 bg-[#0b1221]' : 'border-slate-800 bg-[#0b1221]');
 
                      return (
-                       <div key={group.groupId} className={`p-4 rounded-md border ${borderColor} flex flex-col print:border-black print:bg-white print:text-black`}>
-                         <div className="flex justify-between items-start border-b border-slate-800 pb-3 mb-3 print:border-black">
+                       <div key={group.groupId} className={`p-4 rounded-md border ${borderColor} flex flex-col`}>
+                         <div className="flex justify-between items-start border-b border-slate-800 pb-3 mb-3">
                            <div className="flex-1">
-                             <div className="flex flex-wrap items-center gap-2 mb-1"><span className="text-[10px] font-black text-cyan-400 bg-cyan-950 px-2 py-0.5 rounded border border-cyan-800 tracking-widest font-mono print:text-black print:border-black print:bg-transparent">SYS: {group.reqId}</span></div>
-                             <h3 className="font-bold text-slate-200 text-sm print:text-black">{group.client}</h3>
+                             <div className="flex flex-wrap items-center gap-2 mb-1"><span className="text-[10px] font-black text-cyan-400 bg-cyan-950 px-2 py-0.5 rounded border border-cyan-800 tracking-widest font-mono">SYS: {group.reqId}</span></div>
+                             <h3 className="font-bold text-slate-200 text-sm">{group.client}</h3>
                            </div>
                            <div className="flex flex-col items-end gap-1 shrink-0 pl-2">
-                             <span className="text-[9px] font-bold text-slate-500 font-mono"><Calendar size={10} className="inline print:text-black"/> {group.deadline}</span>
-                             <span className="text-xs font-bold text-cyan-500 font-mono print:text-black">{group.progress}% HOÀN_TẤT</span>
+                             <span className="text-[9px] font-bold text-slate-500 font-mono"><Calendar size={10} className="inline"/> {group.deadline}</span>
+                             <span className="text-xs font-bold text-cyan-500 font-mono">{group.progress}% HOÀN_TẤT</span>
                            </div>
                          </div>
                          <div className="space-y-3 flex-1 overflow-y-auto custom-scrollbar">
                            {Object.entries(itemsByType).map(([type, items]) => (
-                             <div key={type} className="bg-[#050b14]/50 rounded border border-slate-800 overflow-hidden print:border-black print:bg-white">
-                               <div className="bg-slate-900/50 px-3 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-800 font-mono print:text-black print:bg-transparent print:border-black"><Layers size={10} className="inline mr-1"/>{type}</div>
+                             <div key={type} className="bg-[#050b14]/50 rounded border border-slate-800 overflow-hidden">
+                               <div className="bg-slate-900/50 px-3 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-800 font-mono"><Layers size={10} className="inline mr-1"/>{type}</div>
                                <div className="p-2 space-y-2">
                                  {items.map(item => {
                                    const statusInfo = getItemStatus(item);
                                    return (
-                                     <div key={item.id} className="flex flex-col gap-2 border-b border-slate-800/50 last:border-0 pb-3 last:pb-0 pt-1 print:border-black">
+                                     <div key={item.id} className="flex flex-col gap-2 border-b border-slate-800/50 last:border-0 pb-3 last:pb-0 pt-1">
                                        <div className="flex justify-between items-start">
                                          <div className="flex-1 pr-2">
-                                            <span className="text-xs font-semibold text-slate-300 print:text-black">{item.model}</span>
-                                            <div className="text-[9px] text-slate-500 font-mono print:text-black">SL: <b className="text-cyan-500 print:text-black">{item.sampleSize}</b></div>
+                                            <span className="text-xs font-semibold text-slate-300">{item.model}</span>
+                                            <div className="text-[9px] text-slate-500 font-mono">SL: <b className="text-cyan-500">{item.sampleSize}</b></div>
                                          </div>
                                          <div className="flex flex-col items-end gap-1.5">
-                                            <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border font-mono tracking-wider ${statusInfo.color} print:text-black print:border-black print:bg-transparent`}>{statusInfo.text}</span>
+                                            <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border font-mono tracking-wider ${statusInfo.color}`}>{statusInfo.text}</span>
                                             {isSuperAdmin && (
-                                              <div className="flex items-center gap-2 opacity-30 hover:opacity-100 transition-opacity print:hidden">
+                                              <div className="flex items-center gap-2 opacity-30 hover:opacity-100 transition-opacity">
                                                  {confirmDeleteOrderId === item.id ? (
                                                      <div className="flex items-center gap-1 bg-rose-950/50 p-0.5 rounded"><button onClick={() => handleDeleteOrder(item.id)} className="bg-rose-600 text-white p-1 rounded"><Check size={10}/></button><button onClick={() => setConfirmDeleteOrderId(null)} className="bg-slate-700 p-1 rounded"><X size={10}/></button></div>
                                                  ) : (<button onClick={() => setConfirmDeleteOrderId(item.id)} className="text-rose-500 p-1 rounded"><Trash2 size={12}/></button>)}
@@ -1285,8 +1383,8 @@ export default function App() {
 
           {/* TAB 3: DỮ LIỆU KHO HÀNG */}
           {activeTab === 'inventory' && (
-             <div className="space-y-4 lg:space-y-6 print:block max-w-7xl mx-auto h-full flex flex-col print:text-black">
-               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 md:gap-4 print:hidden">
+             <div className="space-y-4 lg:space-y-6 w-full h-full flex flex-col">
+               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 md:gap-4">
                  <div className="w-full md:w-1/2 lg:w-1/3 relative flex gap-2">
                    <div className="relative flex-1">
                      <input type="text" placeholder="TÌM KIẾM MODEL, KHÁCH HÀNG..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 rounded-md bg-[#050b14] border border-cyan-900/50 text-cyan-400 placeholder-cyan-900/50 focus:outline-none focus:border-cyan-400 font-mono text-xs shadow-inner"/>
@@ -1307,13 +1405,13 @@ export default function App() {
                    </div>
                  )}
                </div>
-               <div className="flex-1 overflow-y-auto pb-10 custom-scrollbar print:overflow-visible">
-                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 md:gap-4 print:grid-cols-2 print:gap-4">
+               <div className="flex-1 overflow-y-auto pb-10 custom-scrollbar">
+                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 md:gap-4">
                    {samplesInStock.filter(s => (s.model||'').toLowerCase().includes(searchTerm.toLowerCase()) || (s.client||'').toLowerCase().includes(searchTerm.toLowerCase())).map((sample) => {
                      const isDuplicate = checkIsDuplicate(sample.client, sample.type, sample.model);
                      const isEditing = editingSampleId === sample.id;
                      return (
-                       <div key={sample.id} className={`p-3 md:p-4 rounded-md border transition print:border-black print:bg-white print:text-black ${isDuplicate ? 'bg-rose-950/20 border-rose-900/50 print:bg-white' : 'bg-[#0b1221] border-slate-800 hover:border-cyan-900'}`}>
+                       <div key={sample.id} className={`p-3 md:p-4 rounded-md border transition ${isDuplicate ? 'bg-rose-950/20 border-rose-900/50' : 'bg-[#0b1221] border-slate-800 hover:border-cyan-900'}`}>
                          <div className="flex justify-between items-start h-full">
                            {isEditing ? (
                               <div className="flex-1 space-y-2 pr-2 font-mono">
@@ -1325,18 +1423,18 @@ export default function App() {
                            ) : (
                              <div className="flex-1 flex flex-col h-full justify-between pr-2">
                                <div>
-                                  <div className="flex items-start gap-2 mb-1"><h3 className={`font-bold text-sm leading-tight print:text-black ${isDuplicate ? 'text-rose-400' : 'text-slate-200'}`}>{sample.model}</h3></div>
-                                  <p className="text-[10px] text-slate-500 font-mono tracking-wider mb-1 print:text-black">{sample.client}</p>
-                                  <p className="text-[9px] text-slate-600 font-mono print:text-black">{sample.type}</p>
+                                  <div className="flex items-start gap-2 mb-1"><h3 className={`font-bold text-sm leading-tight ${isDuplicate ? 'text-rose-400' : 'text-slate-200'}`}>{sample.model}</h3></div>
+                                  <p className="text-[10px] text-slate-500 font-mono tracking-wider mb-1">{sample.client}</p>
+                                  <p className="text-[9px] text-slate-600 font-mono">{sample.type}</p>
                                </div>
                                <div className="mt-3 flex items-center justify-between font-mono">
-                                  <span className="text-[10px] font-black text-cyan-400 bg-cyan-950/50 border border-cyan-900 px-2 py-0.5 rounded print:bg-transparent print:border-black print:text-black">SL: {sample.qty}</span>
-                                  {isDuplicate && <span className="text-[8px] font-bold text-rose-300 bg-rose-950/50 border border-rose-800 px-1.5 py-0.5 rounded flex items-center gap-1 print:hidden"><AlertTriangle size={8}/> TRÙNG_LẶP</span>}
+                                  <span className="text-[10px] font-black text-cyan-400 bg-cyan-950/50 border border-cyan-900 px-2 py-0.5 rounded">SL: {sample.qty}</span>
+                                  {isDuplicate && <span className="text-[8px] font-bold text-rose-300 bg-rose-950/50 border border-rose-800 px-1.5 py-0.5 rounded flex items-center gap-1"><AlertTriangle size={8}/> TRÙNG_LẶP</span>}
                                </div>
                              </div>
                            )}
                            {canEditData && (
-                             <div className="print:hidden">
+                             <div>
                                {confirmDeleteSampleId === sample.id ? (
                                  <div className="flex flex-col gap-1 items-end shrink-0 bg-[#050b14] p-1 rounded border border-rose-900/50">
                                    <span className="text-[8px] text-rose-500 font-mono">XÁC_NHẬN_XÓA?</span>
@@ -1377,8 +1475,8 @@ export default function App() {
             const totalWaiting = eqStats.reduce((sum, eq) => sum + eq.waitingCount, 0);
 
              return (
-               <div className="space-y-6 print:hidden max-w-7xl mx-auto">
-                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 print:hidden">
+               <div className="space-y-6 w-full h-full flex flex-col">
+                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
                     <h2 className="text-xl font-bold text-cyan-50 md:hidden font-mono tracking-widest">TRẠM MÁY</h2>
                     <div className="flex gap-2 w-full md:w-auto flex-wrap font-mono md:ml-auto">
                        {canEditData && (
@@ -1390,7 +1488,7 @@ export default function App() {
                  </div>
 
                  {isSuperAdmin && (
-                    <div className="bg-[#0b1221] rounded-md border border-cyan-900/50 p-4 flex flex-col sm:flex-row gap-3 items-center shadow-lg">
+                    <div className="bg-[#0b1221] rounded-md border border-cyan-900/50 p-4 flex flex-col sm:flex-row gap-3 items-center shadow-lg shrink-0">
                        <div className="flex items-center gap-2 w-full sm:w-auto flex-1 font-mono">
                           <Settings2 size={18} className="text-cyan-500" />
                           <input type="text" placeholder="NHẬP TÊN TRẠM MỚI..." value={newStationName} onChange={e => setNewStationName(e.target.value)} className="flex-1 bg-[#050b14] border border-cyan-800 rounded p-2 text-xs text-cyan-400 focus:border-cyan-400 outline-none" onKeyDown={e => e.key === 'Enter' && handleAddStation()}/>
@@ -1399,7 +1497,7 @@ export default function App() {
                     </div>
                  )}
    
-                 <div className="bg-[#0b1221] rounded-md border border-slate-800 overflow-hidden mb-6">
+                 <div className="bg-[#0b1221] rounded-md border border-slate-800 overflow-hidden mb-6 shrink-0">
                     <div className="bg-[#050b14] px-4 py-3 border-b border-slate-800 flex justify-between items-center">
                        <h3 className="font-bold text-xs text-slate-300 flex items-center gap-2 font-mono tracking-widest"><Activity size={16} className="text-cyan-500"/> TRẠNG_THÁI_HỆ_THỐNG</h3>
                        <div className="flex gap-3 text-[9px] font-bold font-mono">
@@ -1417,7 +1515,7 @@ export default function App() {
                     </div>
                  </div>
 
-                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 flex-1 overflow-y-auto pb-10 custom-scrollbar">
                    {equipments.map(eq => {
                      const { running, waiting, history } = getTestsForStation(eq.id);
                      const isAssigning = assigningStation === eq.id;
@@ -1480,11 +1578,11 @@ export default function App() {
                         };
 
                         return (
-                          <div key={eq.id} className={`bg-[#0b1221] rounded-md border overflow-hidden flex flex-col h-full relative transition-colors ${isTimeUp ? 'border-rose-500/50 shadow-[0_0_20px_rgba(244,63,94,0.2)]' : 'border-cyan-800'}`}>
+                          <div key={eq.id} className={`bg-[#0b1221] rounded-md border overflow-hidden flex flex-col h-[500px] relative transition-colors ${isTimeUp ? 'border-rose-500/50 shadow-[0_0_20px_rgba(244,63,94,0.2)]' : 'border-cyan-800'}`}>
                             <div className={`absolute top-0 right-0 text-[8px] font-bold px-2 py-0.5 rounded-bl font-mono z-10 ${isTimeUp ? 'bg-rose-600 text-white' : 'bg-cyan-900 text-cyan-100'}`}>
                                {isTimeUp ? 'YÊU_CẦU_ĐỔI_PHA' : 'QUY_TRÌNH_ĐẶC_BIỆT'}
                             </div>
-                            <div className={`p-3 border-b flex justify-between items-center ${isTimeUp ? 'bg-rose-950/30 border-rose-900' : 'bg-[#050b14] border-cyan-900/50'}`}>
+                            <div className={`p-3 border-b flex justify-between items-center shrink-0 ${isTimeUp ? 'bg-rose-950/30 border-rose-900' : 'bg-[#050b14] border-cyan-900/50'}`}>
                               <h3 className={`font-bold text-sm flex items-center gap-2 font-mono tracking-wider ${isTimeUp ? 'text-rose-400' : 'text-cyan-400'}`}>{eq.name}</h3>
                               {canEditData && <button onClick={() => setAssigningStation(isAssigning ? null : eq.id)} className="text-[10px] font-bold px-2 py-1 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 font-mono tracking-widest" disabled={running.length > 0}>{isAssigning ? 'HỦY' : 'THÊM_VÀO_LÔ'}</button>}
                             </div>
@@ -1492,7 +1590,7 @@ export default function App() {
                             {isAssigning && (() => {
                               const compatibleOrders = orders.filter(o => isDeviceCompatibleWithStation(eq.id, o.type) && !(o.tests || []).some(t => t && t.equip === eq.id && (t.status === 'Đang chạy' || t.status === 'Chờ chạy')));
                               return (
-                                <div className="p-3 bg-indigo-950/30 border-b border-indigo-900 flex flex-col gap-2 font-mono">
+                                <div className="p-3 bg-indigo-950/30 border-b border-indigo-900 flex flex-col gap-2 font-mono shrink-0">
                                   <select className="w-full text-[10px] bg-[#050b14] border border-indigo-800 text-indigo-300 rounded p-1.5 outline-none" value={selectedOrderIdToAssign} onChange={(e) => setSelectedOrderIdToAssign(e.target.value)}>
                                     <option value="">-- CHỌN_MỤC_TIÊU --</option>
                                     {compatibleOrders.length === 0 ? <option value="" disabled>KHÔNG_CÓ_TB_TƯƠNG_THÍCH</option> : compatibleOrders.map(o => <option key={o.id} value={o.id}>[{o.reqId}] {o.model}</option>)}
@@ -1509,7 +1607,7 @@ export default function App() {
 
                             <div className="flex-1 overflow-y-auto flex flex-col p-3 custom-scrollbar">
                                {waiting.length > 0 && running.length === 0 && (
-                                  <div className="p-3 bg-amber-950/20 border border-amber-900/50 mb-3 rounded font-mono">
+                                  <div className="p-3 bg-amber-950/20 border border-amber-900/50 mb-3 rounded font-mono shrink-0">
                                      <h4 className="text-[9px] font-bold text-amber-500 mb-2 uppercase flex items-center gap-1"><Layers size={12}/> LÔ_CHỜ_CHẠY ({waiting.length})</h4>
                                      <div className="space-y-1 mb-2 max-h-32 overflow-y-auto custom-scrollbar">
                                         {waiting.map((test) => (
@@ -1530,14 +1628,14 @@ export default function App() {
                                )}
 
                                {running.length > 0 && (
-                                  <div className={`p-3 rounded border mb-3 flex-1 flex flex-col ${isTimeUp ? 'bg-rose-950/20 border-rose-900/50' : 'bg-cyan-950/10 border-cyan-900/30'}`}>
+                                  <div className={`p-3 rounded border mb-3 flex flex-col shrink-0 ${isTimeUp ? 'bg-rose-950/20 border-rose-900/50' : 'bg-cyan-950/10 border-cyan-900/30'}`}>
                                      <div className="flex justify-between items-center mb-2 font-mono">
                                         <h4 className={`text-[9px] font-bold uppercase flex items-center gap-1 ${isTimeUp ? 'text-rose-500' : 'text-cyan-500'}`}><Activity size={12}/> HỆ_THỐNG_ĐANG_CHẠY ({running.length})</h4>
                                         <span className="text-[8px] bg-[#050b14] px-1.5 py-0.5 rounded border border-cyan-800 text-cyan-400">KTV: {activeBatch?.assignedUser}</span>
                                      </div>
                                      
-                                     <div className={`bg-[#050b14] border rounded p-2 ${isTimeUp ? 'border-rose-900/50' : 'border-cyan-900/50'}`}>
-                                        <div className="flex justify-between items-center border-b border-slate-800 pb-2 mb-2 font-mono">
+                                     <div className={`bg-[#050b14] border rounded p-2 flex flex-col ${isTimeUp ? 'border-rose-900/50' : 'border-cyan-900/50'}`}>
+                                        <div className="flex justify-between items-center border-b border-slate-800 pb-2 mb-2 font-mono shrink-0">
                                            <span className={`text-[10px] font-black uppercase flex items-center gap-1 ${phase === 'Ăn mòn' ? 'text-amber-500' : 'text-cyan-400'}`}>
                                               {phase === 'Ăn mòn' ? <ThermometerSun size={12}/> : <Wind size={12}/>} PHA:{phase}
                                            </span>
@@ -1546,7 +1644,7 @@ export default function App() {
                                               <span className={`text-[10px] font-black flex items-center gap-1 ${timeColor}`}><Timer size={12}/> T-{formatMs(elapsedMs)}</span>
                                            </div>
                                         </div>
-                                        <div className="grid grid-cols-2 gap-1 text-[9px] font-mono text-slate-400">
+                                        <div className="grid grid-cols-2 gap-1 text-[9px] font-mono text-slate-400 shrink-0">
                                            {phase === 'Ăn mòn' ? (
                                               <>
                                                  <div className="bg-slate-900/50 px-1.5 py-0.5 rounded flex justify-between"><span>NHIỆT_ĐỘ:</span><span className="text-cyan-400">25±2°C</span></div>
@@ -1561,7 +1659,7 @@ export default function App() {
                                               </>
                                            )}
                                         </div>
-                                        <div className="mt-2 space-y-0.5 max-h-16 overflow-y-auto custom-scrollbar border-t border-slate-800 pt-2 font-mono text-[9px]">
+                                        <div className="mt-2 space-y-0.5 max-h-20 overflow-y-auto custom-scrollbar border-t border-slate-800 pt-2 font-mono text-[9px] flex-1">
                                            {running.map((test) => (
                                                <div key={`${test.orderId}-${test.testIndex}`} className="flex justify-between items-center text-slate-300">
                                                    <span className="truncate pr-1">&gt; {test.model}</span>
@@ -1569,7 +1667,7 @@ export default function App() {
                                                </div>
                                            ))}
                                         </div>
-                                        <div className="mt-2 pt-2 border-t border-slate-800 flex flex-col gap-1.5 font-mono">
+                                        <div className="mt-2 pt-2 border-t border-slate-800 flex flex-col gap-1.5 font-mono shrink-0">
                                            {isSuperAdmin && (
                                                <button onClick={toggleSO2Pause} className={`w-full py-1 rounded text-[9px] font-bold flex justify-center items-center gap-1 transition ${isPaused ? 'bg-emerald-600/20 border border-emerald-500 text-emerald-400 hover:bg-emerald-600 hover:text-black' : 'bg-rose-900/20 border border-rose-800 text-rose-500 hover:bg-rose-900'}`}>
                                                   {isPaused ? <><Play size={10}/> TIẾP_TỤC_CHẠY</> : <><Pause size={10}/> QUẢN_LÝ:_TẠM_DỪNG</>}
@@ -1589,8 +1687,8 @@ export default function App() {
                                   </div>
                                )}
 
-                               <h4 className="text-[9px] font-bold text-cyan-800 mb-1 uppercase font-mono tracking-widest mt-auto pt-2 border-t border-cyan-900/30">LỊCH_SỬ_HỆ_THỐNG ({history.length})</h4>
-                               <div className="max-h-20 overflow-y-auto custom-scrollbar">
+                               <h4 className="text-[9px] font-bold text-cyan-800 mb-1 uppercase font-mono tracking-widest mt-auto pt-2 border-t border-cyan-900/30 shrink-0">LỊCH_SỬ_HỆ_THỐNG ({history.length})</h4>
+                               <div className="flex-1 overflow-y-auto custom-scrollbar">
                                    {history.map((test) => (
                                      <div key={`${test.orderId}-${test.testIndex}`} className="text-[9px] font-mono text-slate-500 flex justify-between items-center mb-0.5">
                                        <span className="truncate pr-1">- {test.model}</span><CheckCircle2 size={10} className="text-emerald-700" />
@@ -1604,8 +1702,8 @@ export default function App() {
    
                      // Trạm máy thông thường
                      return (
-                       <div key={eq.id} className="bg-[#0b1221] rounded-md border border-cyan-800 overflow-hidden flex flex-col h-full hover:border-cyan-500 transition-colors">
-                         <div className="p-3 border-b bg-[#050b14] border-cyan-900/50 flex justify-between items-center">
+                       <div key={eq.id} className="bg-[#0b1221] rounded-md border border-cyan-800 overflow-hidden flex flex-col h-[500px] hover:border-cyan-500 transition-colors">
+                         <div className="p-3 border-b bg-[#050b14] border-cyan-900/50 flex justify-between items-center shrink-0">
                            <h3 className="font-bold text-sm text-cyan-400 font-mono tracking-wider">{eq.name}</h3>
                            <div className="flex gap-2">
                              {canEditData && <button onClick={() => setAssigningStation(isAssigning ? null : eq.id)} className="text-[9px] font-bold px-2 py-1 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 font-mono tracking-widest">{isAssigning ? 'HỦY' : 'THÊM_THIẾT_BỊ'}</button>}
@@ -1616,7 +1714,7 @@ export default function App() {
                          {isAssigning && (() => {
                            const compatibleOrders = orders.filter(o => isDeviceCompatibleWithStation(eq.id, o.type) && !(o.tests || []).some(t => t && t.equip === eq.id && (t.status === 'Đang chạy' || t.status === 'Chờ chạy')));
                            return (
-                             <div className="p-3 bg-cyan-950/20 border-b border-cyan-900/50 flex flex-col gap-2 font-mono">
+                             <div className="p-3 bg-cyan-950/20 border-b border-cyan-900/50 flex flex-col gap-2 font-mono shrink-0">
                                <select className="w-full text-[10px] bg-[#050b14] border border-cyan-800 text-cyan-400 rounded p-1.5 outline-none" value={selectedOrderIdToAssign} onChange={(e) => setSelectedOrderIdToAssign(e.target.value)}>
                                  <option value="">-- CHỌN MỤC TIÊU --</option>
                                  {compatibleOrders.length === 0 ? <option value="" disabled>KHÔNG_CÓ_TB_TƯƠNG_THÍCH</option> : compatibleOrders.map(o => <option key={o.id} value={o.id}>[{o.reqId}] {o.model} (SL: {o.sampleSize})</option>)}
@@ -1632,8 +1730,9 @@ export default function App() {
                            );
                          })()}
 
-                         <div className="p-3 flex-1 overflow-y-auto custom-scrollbar">
-                           <h4 className="text-[9px] font-bold text-cyan-700 mb-2 flex items-center gap-1 uppercase tracking-widest font-mono"><Activity size={10}/> HỆ_THỐNG_ĐANG_CHẠY ({running.length})</h4>
+                         <div className="p-3 flex-1 overflow-y-auto custom-scrollbar flex flex-col">
+                           <h4 className="text-[9px] font-bold text-cyan-700 mb-2 flex items-center gap-1 uppercase tracking-widest font-mono shrink-0"><Activity size={10}/> HỆ_THỐNG_ĐANG_CHẠY ({running.length})</h4>
+                           <div className="flex-none">
                            {running.map((test) => (
                              <div key={`${test.orderId}-${test.testIndex}`} className="bg-[#050b14] p-2 rounded border border-cyan-900/50 mb-2 flex justify-between items-center border-l-2 border-l-cyan-500">
                                <div className="flex-1 pr-2">
@@ -1647,14 +1746,17 @@ export default function App() {
                                </div>
                              </div>
                            ))}
+                           </div>
 
-                           <h4 className="text-[9px] font-bold text-slate-600 mb-1 flex items-center gap-1 uppercase tracking-widest border-t border-slate-800 pt-3 mt-3 font-mono"><History size={10}/> LỊCH_SỬ_HỆ_THỐNG ({history.length})</h4>
+                           <h4 className="text-[9px] font-bold text-slate-600 mb-1 flex items-center gap-1 uppercase tracking-widest border-t border-slate-800 pt-3 mt-auto font-mono shrink-0"><History size={10}/> LỊCH_SỬ_HỆ_THỐNG ({history.length})</h4>
+                           <div className="flex-1 overflow-y-auto custom-scrollbar">
                            {history.map((test) => (
                              <div key={`${test.orderId}-${test.testIndex}`} className="text-[9px] font-mono text-slate-500 flex justify-between items-center mb-0.5">
                                <div><span className="text-slate-600 mr-1">[{test.reqId}]</span>{test.model}</div>
                                <CheckCircle2 size={10} className="text-emerald-800 shrink-0" />
                              </div>
                            ))}
+                           </div>
                          </div>
                        </div>
                      );
@@ -1666,7 +1768,7 @@ export default function App() {
 
           {/* TAB 5: NHÂN SỰ VẬN HÀNH */}
           {activeTab === 'personnel' && (
-            <div className="space-y-6 max-w-7xl mx-auto flex flex-col h-full print:block">
+            <div className="space-y-6 w-full flex flex-col h-full print:block">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 print:hidden">
                 <h2 className="text-xl font-bold text-cyan-50 md:hidden font-mono tracking-widest">NHÂN_SỰ</h2>
                 <div className="flex gap-2 w-full md:w-auto flex-wrap font-mono">
@@ -1714,200 +1816,6 @@ export default function App() {
                  </div>
               )}
 
-              {/* MODAL LỊCH CHẤM CÔNG HÀNG LOẠT */}
-              {showAttendanceCalendar && isSuperAdmin && (() => {
-                  const year = attendanceViewDate.getFullYear(); const month = attendanceViewDate.getMonth();
-                  const daysInMonth = new Date(year, month + 1, 0).getDate(); const firstDay = new Date(year, month, 1).getDay();
-                  const startOffset = firstDay === 0 ? 6 : firstDay - 1; 
-                  const calendarDays = [];
-                  for (let i = 0; i < startOffset; i++) calendarDays.push(null);
-                  for (let i = 1; i <= daysInMonth; i++) calendarDays.push(getLocalYYYYMMDD(new Date(year, month, i)));
-
-                  return (
-                 <div className="fixed inset-0 bg-[#050b14]/95 backdrop-blur-md z-50 flex flex-col w-[100vw] h-[100vh] overflow-hidden animate-in fade-in print:hidden">
-                    <div className="bg-[#0b1221] flex justify-between items-center p-4 border-b border-cyan-900/50 shrink-0">
-                        <div className="flex items-center gap-3">
-                            <CalendarCheck size={24} className="text-cyan-500"/>
-                            <h2 className="text-xl font-black text-cyan-50 tracking-widest font-mono">QUẢN_LÝ_CHẤM_CÔNG</h2>
-                        </div>
-                        <button onClick={() => { setShowAttendanceCalendar(false); setPinnedTooltip(null); }} className="px-4 py-1.5 bg-rose-900/30 border border-rose-800 text-rose-500 text-[10px] tracking-widest font-bold rounded hover:bg-rose-900 font-mono">ĐÓNG</button>
-                    </div>
-
-                    <div className="flex flex-1 overflow-hidden bg-[#050b14]">
-                        {/* Cột trái */}
-                        <div className="w-64 md:w-72 lg:w-80 bg-[#0b1221] border-r border-cyan-900/50 flex flex-col z-10 shrink-0 h-full font-mono">
-                            <div className="flex bg-[#050b14] p-1 m-3 rounded border border-slate-800 shrink-0">
-                                <button onClick={() => setAttendanceMode('date')} className={`flex-1 py-1.5 text-[9px] font-bold tracking-widest rounded transition-colors ${attendanceMode === 'date' ? 'bg-cyan-900/50 text-cyan-300' : 'text-slate-600 hover:text-slate-400'}`}>THEO_NGÀY</button>
-                                <button onClick={() => { setAttendanceMode('person'); if (!selectedAttendanceStaffId && activePersonnel.length > 0) setSelectedAttendanceStaffId(activePersonnel[0].id); }} className={`flex-1 py-1.5 text-[9px] font-bold tracking-widest rounded transition-colors ${attendanceMode === 'person' ? 'bg-cyan-900/50 text-cyan-300' : 'text-slate-600 hover:text-slate-400'}`}>THEO_NGƯỜI</button>
-                            </div>
-
-                            {attendanceMode === 'date' ? (
-                                <>
-                                    <div className="p-3 bg-cyan-950/10 border-y border-cyan-900/30 text-center shrink-0">
-                                        <input type="date" value={selectedAttendanceDate} onChange={(e) => setSelectedAttendanceDate(e.target.value)} className="w-full text-center bg-[#050b14] border border-cyan-800 text-cyan-400 rounded p-1.5 text-xs outline-none cursor-pointer"/>
-                                    </div>
-                                    <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
-                                        {activePersonnel.map(p => {
-                                            const mark = attendanceBatchData[p.id] || '';
-                                            return (
-                                                <div key={p.id} className="flex justify-between items-center p-2 border-b border-slate-800 gap-2">
-                                                    <span className="font-semibold text-[10px] text-slate-300 truncate flex-1">{p.name}</span>
-                                                    <div className="flex gap-1 shrink-0 items-center">
-                                                        <button onClick={() => handleMarkStaff(p.id, 'V')} className={`w-6 h-6 rounded text-[10px] font-black flex items-center justify-center transition-all border ${mark === 'V' ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' : 'bg-transparent border-slate-700 text-slate-600 hover:border-emerald-900 hover:text-emerald-700'}`}>V</button>
-                                                        <button onClick={() => handleMarkStaff(p.id, 'X')} className={`w-6 h-6 rounded text-[10px] font-black flex items-center justify-center transition-all border ${mark === 'X' ? 'bg-rose-500/20 border-rose-500 text-rose-400' : 'bg-transparent border-slate-700 text-slate-600 hover:border-rose-900 hover:text-rose-700'}`}>X</button>
-                                                        <button onClick={() => handleMarkStaff(p.id, mark.startsWith('P') ? '' : 'P-4')} className={`w-6 h-6 rounded text-[9px] font-black flex items-center justify-center transition-all border ${mark.startsWith('P') ? 'bg-amber-500/20 border-amber-500 text-amber-400' : 'bg-transparent border-slate-700 text-slate-600 hover:border-amber-900 hover:text-amber-700'}`}>P</button>
-                                                        {mark.startsWith('P') && (
-                                                            <select value={mark.split('-')[1]} onChange={(e) => handleMarkStaff(p.id, `P-${e.target.value}`)} className="w-10 h-6 text-[9px] border border-amber-800 rounded bg-[#050b14] text-center text-amber-400 appearance-none px-0.5 outline-none">
-                                                                {[1,2,3,4,5,6,7,8].map(h => <option key={h} value={h}>{h} GIỜ</option>)}
-                                                            </select>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                    <div className="p-3 bg-[#0b1221] border-t border-cyan-900/50 mt-auto shrink-0">
-                                        <button onClick={() => saveAttendance(true)} className="w-full py-2 bg-cyan-600/20 border border-cyan-500 text-cyan-400 text-[10px] font-bold tracking-widest rounded hover:bg-cyan-600 hover:text-black transition">LƯU_DỮ_LIỆU</button>
-                                    </div>
-                                </>
-                            ) : (
-                                <>
-                                    <div className="p-3 bg-cyan-950/10 border-y border-cyan-900/30 text-center shrink-0">
-                                        <div className="text-xs text-cyan-400 bg-[#050b14] border border-cyan-800 rounded p-1.5 truncate">
-                                            {activePersonnel.find(p => p.id === selectedAttendanceStaffId)?.name || 'CHƯA_CHỌN'}
-                                        </div>
-                                    </div>
-                                    <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
-                                        {activePersonnel.map(p => (
-                                            <button key={p.id} onClick={() => { setSelectedAttendanceStaffId(p.id); setPersonBatchData({}); }} className={`w-full text-left flex justify-between items-center p-2.5 mb-1 border rounded transition-all ${selectedAttendanceStaffId === p.id ? 'bg-cyan-900/30 border-cyan-500 text-cyan-300' : 'bg-transparent border-slate-800 text-slate-500 hover:border-slate-600'}`}>
-                                                <span className="font-semibold text-[10px] truncate">{p.name}</span>
-                                                {selectedAttendanceStaffId === p.id && <ChevronRight size={14} className="text-cyan-500"/>}
-                                            </button>
-                                        ))}
-                                    </div>
-                                    <div className="p-3 bg-[#0b1221] border-t border-cyan-900/50 mt-auto shrink-0">
-                                        <button onClick={() => saveAttendance(false)} className="w-full py-2 bg-cyan-600/20 border border-cyan-500 text-cyan-400 text-[10px] font-bold tracking-widest rounded hover:bg-cyan-600 hover:text-black transition">LƯU_DỮ_LIỆU_NHÂN_SỰ</button>
-                                    </div>
-                                </>
-                            )}
-                        </div>
-
-                        {/* Cột phải: Lịch */}
-                        <div className="flex-1 p-4 lg:p-6 flex flex-col bg-[#050b14] overflow-y-auto custom-scrollbar">
-                            <div className="flex justify-between items-center mb-4 bg-[#0b1221] p-2 rounded border border-slate-800 shrink-0 font-mono">
-                                <div className="flex gap-1">
-                                    <button onClick={() => setAttendanceViewDate(new Date(year - 1, month, 1))} className="p-1.5 text-slate-500 hover:text-cyan-400 rounded"><ChevronsLeft size={16}/></button>
-                                    <button onClick={() => setAttendanceViewDate(new Date(year, month - 1, 1))} className="p-1.5 text-slate-500 hover:text-cyan-400 rounded"><ChevronLeft size={16}/></button>
-                                </div>
-                                <h3 className="text-sm font-black text-slate-300 tracking-widest">T{month + 1} // {year}</h3>
-                                <div className="flex gap-1">
-                                    <button onClick={() => setAttendanceViewDate(new Date(year, month + 1, 1))} className="p-1.5 text-slate-500 hover:text-cyan-400 rounded"><ChevronRight size={16}/></button>
-                                    <button onClick={() => setAttendanceViewDate(new Date(year + 1, month, 1))} className="p-1.5 text-slate-500 hover:text-cyan-400 rounded"><ChevronsRight size={16}/></button>
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-7 gap-2 mb-2 text-center shrink-0">
-                                {['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'].map(day => (<div key={day} className="text-[10px] font-black text-slate-600 font-mono">{day}</div>))}
-                            </div>
-                            
-                            <div className="grid grid-cols-7 gap-2 flex-1 auto-rows-max font-mono">
-                                {calendarDays.map((dateStr, idx) => {
-                                    if (!dateStr) return <div key={`empty-${idx}`}></div>;
-                                    const isTodayLocal = dateStr === getLocalYYYYMMDD(new Date());
-                                    const dayNum = parseInt(dateStr.split('-')[2], 10);
-                                    
-                                    if (attendanceMode === 'date') {
-                                        const isSelected = dateStr === selectedAttendanceDate;
-                                        let hasWorking = false; let absentees = []; let partTimers = [];
-                                        activePersonnel.forEach(p => {
-                                            const st = p.timesheet?.[dateStr]?.status; const nt = p.timesheet?.[dateStr]?.note;
-                                            if (st === 'Nghỉ phép' || st === 'Nghỉ' || st === 'Vắng mặt') absentees.push({ name: p.name, note: nt || 'NGHỈ' });
-                                            else if (st === 'Đang làm' || st === 'Làm việc') hasWorking = true;
-                                            else if (st === 'Part-time') { hasWorking = true; partTimers.push({ name: p.name, note: nt || 'LÀM THEO CA' }); }
-                                        });
-
-                                        let circleClass = "border-slate-800 bg-[#0b1221] text-slate-500";
-                                        if (absentees.length > 0) circleClass = "bg-rose-950/50 border-rose-500 text-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.3)]"; 
-                                        else if (hasWorking) circleClass = "bg-emerald-950/50 border-emerald-500 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.2)]"; 
-
-                                        if (isSelected) circleClass += " ring-2 ring-cyan-500 scale-110 z-10";
-
-                                        const rowIndex = Math.floor(idx / 7); const colIndex = idx % 7; 
-                                        const isPinned = pinnedTooltip === dateStr;
-                                        const isTop = rowIndex <= 2;
-                                        const tooltipStyle = { zIndex: 9999, ...(isTop ? { top: 'calc(100% + 8px)' } : { bottom: 'calc(100% + 8px)' }), ...(colIndex <= 1 ? { left: '0' } : colIndex >= 5 ? { right: '0' } : { left: '50%', transform: 'translateX(-50%)' }) };
-
-                                        return (
-                                            <div key={dateStr} className={`relative group flex justify-center py-1 h-full z-0 ${isPinned ? 'z-50' : 'hover:z-50 focus-within:z-50'}`}>
-                                                <button onClick={() => { setSelectedAttendanceDate(dateStr); setPinnedTooltip((absentees.length>0||partTimers.length>0) && pinnedTooltip!==dateStr ? dateStr : null); }} className={`w-10 h-10 rounded flex flex-col items-center justify-center transition-all border ${circleClass}`}>
-                                                    <span className="text-sm">{dayNum}</span>
-                                                    {isTodayLocal && <span className="absolute bottom-1 w-4 h-0.5 bg-cyan-500"></span>}
-                                                </button>
-                                                
-                                                {(absentees.length > 0 || partTimers.length > 0) && (
-                                                    <div onClick={(e) => e.stopPropagation()} style={tooltipStyle} className={`absolute ${isPinned ? 'flex' : 'hidden group-hover:flex'} flex-col w-48 bg-[#0b1221] border border-cyan-900 text-white rounded shadow-2xl overflow-hidden animate-in fade-in`}>
-                                                        {absentees.length > 0 && (
-                                                            <>
-                                                                <div className="bg-rose-950/80 text-rose-400 font-bold flex justify-between px-2 py-1.5 text-[9px] border-b border-rose-900">
-                                                                    <span>VẮNG_MẶT ({absentees.length})</span>
-                                                                    {isPinned ? <button onClick={() => setPinnedTooltip(null)} className="hover:text-white"><X size={12}/></button> : <span className="opacity-50">(GHIM)</span>}
-                                                                </div>
-                                                                <div className="p-1.5 space-y-1 max-h-32 overflow-y-auto custom-scrollbar">
-                                                                    {absentees.map((a, i) => (<div key={i} className="flex justify-between border-b border-slate-800 pb-1 text-[9px]"><span className="text-rose-200">{a.name}</span><span className="text-slate-500">{a.note}</span></div>))}
-                                                                </div>
-                                                            </>
-                                                        )}
-                                                        {partTimers.length > 0 && (
-                                                            <>
-                                                                <div className="bg-amber-950/80 text-amber-400 font-bold flex justify-between px-2 py-1.5 text-[9px] border-b border-amber-900 border-t border-t-amber-900">
-                                                                    <span>LÀM_THEO_CA ({partTimers.length})</span>
-                                                                    {isPinned && absentees.length === 0 && <button onClick={() => setPinnedTooltip(null)} className="hover:text-white"><X size={12}/></button>}
-                                                                </div>
-                                                                <div className="p-1.5 space-y-1 max-h-32 overflow-y-auto custom-scrollbar">
-                                                                    {partTimers.map((a, i) => (<div key={i} className="flex justify-between border-b border-slate-800 pb-1 text-[9px]"><span className="text-amber-200">{a.name}</span><span className="text-slate-500">{a.note}</span></div>))}
-                                                                </div>
-                                                            </>
-                                                        )}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    } else {
-                                        const staff = activePersonnel.find(p => p.id === selectedAttendanceStaffId);
-                                        const mark = personBatchData[dateStr] !== undefined ? personBatchData[dateStr] : (() => {
-                                                const st = staff?.timesheet?.[dateStr]?.status; const nt = staff?.timesheet?.[dateStr]?.note;
-                                                if (st === 'Đang làm' || st === 'Làm việc') return 'V'; if (st === 'Nghỉ phép' || st === 'Nghỉ' || st === 'Vắng mặt') return 'X';
-                                                if (st === 'Part-time') return `P-${nt?.match(/(\d+)/)?.[1] || '4'}`; return '';
-                                            })();
-                                        
-                                        let circleClass = "border-slate-800 bg-[#0b1221] text-slate-500";
-                                        if (mark === 'V') circleClass = "bg-emerald-950/50 border-emerald-500 text-emerald-400";
-                                        if (mark === 'X') circleClass = "bg-rose-950/50 border-rose-500 text-rose-400";
-                                        if (mark?.startsWith('P')) circleClass = "bg-amber-950/50 border-amber-500 text-amber-400";
-
-                                        return (
-                                            <div key={dateStr} className="relative flex justify-center py-1 h-full z-0 hover:z-10 focus-within:z-10">
-                                                <button onClick={() => handleTogglePersonDay(dateStr)} className={`w-10 h-10 rounded flex flex-col items-center justify-center transition-all border ${circleClass}`}>
-                                                    <span className="text-sm">{dayNum}</span>
-                                                    {isTodayLocal && <span className={`absolute bottom-1 w-4 h-0.5 ${mark ? 'bg-white' : 'bg-cyan-500'}`}></span>}
-                                                </button>
-                                                {mark?.startsWith('P') && (
-                                                    <div className="absolute top-full mt-1 z-50 animate-in fade-in" onClick={(e) => e.stopPropagation()}>
-                                                        <select value={mark.split('-')[1]} onChange={(e) => setPersonBatchData(prev => ({ ...prev, [dateStr]: `P-${e.target.value}` }))} className="p-0.5 text-[9px] border border-amber-500 bg-[#050b14] text-amber-400 text-center outline-none">
-                                                            {[1,2,3,4,5,6,7,8].map(h => <option key={h} value={h}>{h} GIỜ</option>)}
-                                                        </select>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    }
-                                })}
-                            </div>
-                        </div>
-                    </div>
-                 </div>
-              );})()}
-
               <div className="flex-1 overflow-y-auto pb-10 custom-scrollbar print:overflow-visible">
                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 print:grid-cols-2 print:gap-4 print:text-black">
                    {activePersonnel.map((p) => {
@@ -1919,6 +1827,13 @@ export default function App() {
                          displayStatus = 'Nghỉ CN (Hết giờ)';
                      } else if (isTodaySunday && p.timesheet?.[todayStr]?.status === 'Đang làm') {
                          displayStatus = 'Tăng ca CN';
+                     } else if (p.timesheet?.[todayStr]?.status) {
+                         const st = p.timesheet?.[todayStr]?.status;
+                         if(st === 'Part-time') {
+                             displayStatus = 'Part-time (' + (p.timesheet?.[todayStr]?.note?.match(/(\d+)/)?.[1] || '4') + 'H)';
+                         } else {
+                             displayStatus = st;
+                         }
                      }
                      
                      return (
@@ -1993,6 +1908,19 @@ export default function App() {
 
         </main>
       </div>
+
+      {/* 📱 BOTTOM NAV MOBILE (Z-INDEX 50) */}
+      <nav className="md:hidden bg-[#0b1221]/95 backdrop-blur-md border-t border-cyan-900/50 fixed bottom-0 left-0 w-full flex justify-between px-2 py-2 pb-safe z-50 shadow-[0_-10px_30px_rgba(6,182,212,0.1)] print:hidden">
+         {navItems.map(item => {
+            const Icon = item.icon; const isActive = activeTab === item.id;
+            return (
+              <button key={item.id} onClick={() => setActiveTab(item.id)} className={`flex flex-col items-center gap-1 w-1/5 transition-all duration-300 ${isActive ? 'text-cyan-400 scale-110' : 'text-slate-600 hover:text-cyan-700'}`}>
+                <Icon size={isActive ? 22 : 20} className={isActive ? 'drop-shadow-[0_0_8px_rgba(6,182,212,0.8)]' : ''} />
+                <span className="text-[8px] font-bold tracking-wider font-mono text-center leading-tight">{item.label.split(' ')[0]}</span>
+              </button>
+            )
+         })}
+      </nav>
     </div>
     </>
   );
