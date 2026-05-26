@@ -4,13 +4,12 @@ import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken }
 import { 
   getFirestore, collection, onSnapshot, doc, setDoc, updateDoc, deleteDoc
 } from 'firebase/firestore';
-
 import { 
   ClipboardList, Settings2, LayoutDashboard, CheckCircle2, Users, Sun, Moon, AlertTriangle, Calendar, Activity, Archive, Printer, Search, UploadCloud, Loader2, X, PlusCircle, Trash2, Edit2, Check, History, Briefcase, ChevronDown, ChevronUp, ChevronRight, Download, LogOut, KeyRound, ThermometerSun, Wind, Timer, Pause, Play, Layers, UserMinus, UserCheck, UserX, CalendarCheck, Crosshair, Cpu, Database, ChevronsLeft, ChevronLeft, ChevronsRight
 } from 'lucide-react';
 
 // =========================================================================
-// 🚀 CẤU HÌNH FIREBASE VÀ ĐƯỜNG DẪN DỮ LIỆU CHUẨN (BẢO VỆ DỮ LIỆU)
+// 🚀 1. CẤU HÌNH FIREBASE GỐC (KẾT NỐI TRỰC TIẾP 100% VÀO DB CỦA BẠN)
 // =========================================================================
 const fallbackConfig = {
   apiKey: "AIzaSyCoYYrj_cuqwm_5N0NQLUCEzKGh7DYheDE",
@@ -22,19 +21,19 @@ const fallbackConfig = {
 };
 
 const firebaseConfig = typeof __firebase_config !== 'undefined' && Object.keys(JSON.parse(__firebase_config || '{}')).length > 0 
-  ? JSON.parse(__firebase_config) : fallbackConfig;
+  ? JSON.parse(__firebase_config) 
+  : fallbackConfig;
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// SỬ DỤNG ĐƯỜNG DẪN CANVAS ĐỂ KHÔI PHỤC LẠI DỮ LIỆU HIỆN CÓ CỦA BẠN
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const getCol = (colName) => collection(db, 'artifacts', appId, 'public', 'data', colName);
-const getDocument = (colName, docId) => doc(db, 'artifacts', appId, 'public', 'data', colName, docId);
+// Trỏ thẳng vào thư mục gốc của Firebase, KHÔNG dùng bất kỳ đường dẫn ảo nào.
+const getCol = (colName) => collection(db, colName);
+const getDocument = (colName, docId) => doc(db, colName, docId);
 
 // =========================================================================
-// 🚀 HÀM HỖ TRỢ
+// 🚀 2. HÀM HỖ TRỢ LÕI VÀ LOGIC CHẤM CÔNG
 // =========================================================================
 const getLocalYYYYMMDD = (date) => {
   const offset = date.getTimezoneOffset();
@@ -42,6 +41,30 @@ const getLocalYYYYMMDD = (date) => {
 };
 
 const isSundayStr = (dateStr) => dateStr ? new Date(dateStr).getDay() === 0 : false;
+const isSaturdayStr = (dateStr) => dateStr ? new Date(dateStr).getDay() === 6 : false;
+const isHanhChinh = (person) => String(person?.shift || '').toLowerCase().includes('hành chính') || String(person?.shift || '').toLowerCase() === 'hc';
+
+const getPersonnelDisplayStatus = (person, dateStr) => {
+    const isSun = isSundayStr(dateStr);
+    const isSat = isSaturdayStr(dateStr);
+    const isHC = isHanhChinh(person);
+    const st = person.timesheet?.[dateStr]?.status;
+    const nt = person.timesheet?.[dateStr]?.note;
+
+    if (st) {
+        if (st === 'Nghỉ phép' || st === 'Nghỉ' || st === 'Vắng mặt') return 'Nghỉ phép';
+        if (st === 'Part-time') return `Part-time (${nt?.match(/(\d+)/)?.[1] || '4'}H)`;
+        if (st === 'Đang làm' || st === 'Làm việc') {
+            if (isSun) return 'Tăng ca CN';
+            if (isSat && isHC) return 'Tăng ca T7';
+            return 'Đang làm';
+        }
+    }
+    
+    if (isSun) return 'Nghỉ CN (Hết giờ)';
+    if (isSat && isHC) return 'Nghỉ T7 (Hết giờ)';
+    return person.status === 'Làm việc' ? 'Đang làm' : (person.status || 'Đang làm');
+};
 
 const getRoleWeight = (role) => {
   const r = String(role || '').toLowerCase();
@@ -94,11 +117,16 @@ const navItems = [
 ];
 
 export default function App() {
+  // =========================================================================
+  // 3. KHAI BÁO STATE
+  // =========================================================================
   const [userRole, setUserRole] = useState(null); 
   const [loginPassword, setLoginPassword] = useState('');
   const [showLoginError, setShowLoginError] = useState(false);
+  
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [authError, setAuthError] = useState('');
 
   const [activeTab, setActiveTab] = useState('dashboard');
   const [currentShift, setCurrentShift] = useState('Ngày');
@@ -116,6 +144,7 @@ export default function App() {
   const [printMonth, setPrintMonth] = useState(new Date().getMonth() + 1);
   const [printYear, setPrintYear] = useState(new Date().getFullYear());
   const [isPrintingMonthly, setIsPrintingMonthly] = useState(false);
+
   const [currentTime, setCurrentTime] = useState(new Date());
 
   const [personnel, setPersonnel] = useState([]);
@@ -152,14 +181,14 @@ export default function App() {
   const [tso2SelectedUser, setTso2SelectedUser] = useState('');
   const [newStationName, setNewStationName] = useState(''); 
 
-  const todayStr = getLocalYYYYMMDD(new Date());
-  const isTodaySunday = new Date().getDay() === 0;
+  const todayStr = getLocalYYYYMMDD(currentTime);
+  const isTodaySunday = isSundayStr(todayStr);
 
   const canEditData = userRole === 'ADMIN' || userRole === 'USER'; 
   const isSuperAdmin = userRole === 'ADMIN'; 
 
   // =========================================================================
-  // LOGIC XỬ LÝ DỮ LIỆU
+  // 4. USEMEMO - QUẢN LÝ DỮ LIỆU
   // =========================================================================
   const printDaysArray = useMemo(() => {
     const daysInPrintMonth = new Date(printYear, printMonth, 0).getDate();
@@ -242,15 +271,15 @@ export default function App() {
   }, [orders, equipments]);
 
   const dashboardStaff = useMemo(() => activeStaff.filter(p => {
-     const timesheetToday = p.timesheet?.[todayStr]?.status;
-     if (isTodaySunday) return timesheetToday === 'Đang làm' || timesheetToday === 'Làm việc' || timesheetToday === 'Part-time' || (staffLocations[p.name] && staffLocations[p.name].size > 0);
+     const displayStat = getPersonnelDisplayStatus(p, todayStr);
+     if (displayStat.includes('Nghỉ')) return false; 
      const s = String(p.shift || 'Hành Chính').toLowerCase();
      const isDayPerson = s.includes('hành chính') || s === 'hc' || s.includes('ngày') || s.includes('part');
      return currentShift === 'Ngày' ? isDayPerson : (!isDayPerson || (staffLocations[p.name] && staffLocations[p.name].size > 0));
-  }), [activeStaff, currentShift, staffLocations, todayStr, isTodaySunday]);
+  }), [activeStaff, currentShift, staffLocations, todayStr]);
 
   // =========================================================================
-  // EFFECTS KHỞI TẠO HỆ THỐNG VÀ FIREBASE
+  // 5. USEEFFECTS VÀ XÁC THỰC FIREBASE (ĐĂNG NHẬP ẨN DANH)
   // =========================================================================
   useEffect(() => {
     const script = document.createElement('script');
@@ -265,34 +294,39 @@ export default function App() {
   useEffect(() => {
     const initAuth = async () => { 
         try { 
-            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(auth, __initial_auth_token);
-            else await signInAnonymously(auth); 
-        } catch (error) { console.error("Lỗi xác thực:", error); setIsLoading(false); } 
+            // Luôn đăng nhập ẩn danh trực tiếp vào Database của bạn
+            await signInAnonymously(auth); 
+        } catch (error) { 
+            console.error("Lỗi Auth Firebase:", error); 
+            setAuthError("Lỗi cấu hình Database. Hãy kiểm tra cài đặt Authentication trên Firebase.");
+            setIsLoading(false); 
+        } 
     };
     initAuth();
     
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser); 
-      if (!currentUser) setIsLoading(false);
+      if (!currentUser && !authError) setIsLoading(false);
     });
 
     const safeTimer = setTimeout(() => setIsLoading(false), 5000);
     return () => { unsubscribeAuth(); clearTimeout(safeTimer); };
-  }, []);
+  }, [authError]);
 
   useEffect(() => {
     if (!user) return;
-    const errHandler = (err) => { console.warn("Lỗi Firebase:", err.message); setIsLoading(false); };
+    const errHandler = (err) => { console.warn("Lỗi đồng bộ DB:", err.message); setIsLoading(false); };
 
     const unsubPersonnel = onSnapshot(getCol('personnel'), (snap) => setPersonnel(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))), errHandler);
     const unsubEquipments = onSnapshot(getCol('equipments'), (snap) => {
        const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
        const core = [ { id: 'TNL-K', name: 'Tunel Khói' }, { id: 'TNL-N', name: 'Tunel Nhiệt' }, { id: 'MR', name: 'Máy Rung' }, { id: 'TNA-N', name: 'Tủ Nóng ẩm cỡ nhỏ' }, { id: 'TNA-T', name: 'Tủ Nóng ẩm cỡ trung' }, { id: 'TSO2', name: 'Tủ SO2' }, { id: 'PAS', name: 'Phòng âm thanh + ánh sáng' } ];
-       core.forEach(c => { if (!data.some(eq => eq.id === c.id)) setDoc(getDocument('equipments', c.id), c).catch(e=>console.warn(e)); });
+       core.forEach(c => { if (!data.some(eq => eq.id === c.id)) setDoc(getDocument('equipments', c.id), c).catch(e=>{}); });
        setEquipments(data.sort((a, b) => { if(a.id==='TSO2') return -1; if(b.id==='TSO2') return 1; return (a.name||'').localeCompare(b.name||'','vi'); }));
     }, errHandler);
     const unsubSamples = onSnapshot(getCol('samplesInStock'), (snap) => setSamplesInStock(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))), errHandler);
     const unsubOrders = onSnapshot(getCol('orders'), (snap) => { setOrders(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))); setIsLoading(false); }, errHandler);
+    
     return () => { unsubPersonnel(); unsubSamples(); unsubEquipments(); unsubOrders(); };
   }, [user]);
 
@@ -312,7 +346,7 @@ export default function App() {
   }, [showAttendanceCalendar, selectedAttendanceDate, attendanceMode, selectedAttendanceStaffId, activePersonnel]);
 
   // =========================================================================
-  // HANDLERS
+  // 6. CÁC HÀM XỬ LÝ SỰ KIỆN (HANDLERS)
   // =========================================================================
   const handleLogin = () => {
     if (loginPassword === '9299') setUserRole('ADMIN');
@@ -322,7 +356,7 @@ export default function App() {
   };
   const handleLogout = () => { setUserRole(null); setLoginPassword(''); };
 
-  const isDeviceCompatibleWithStation = (stationId, deviceType) => {
+  const isDeviceCompatibleWithStationCheck = (stationId, deviceType) => {
     const cat = categorizeDevice(deviceType);
     switch (stationId) {
       case 'TNL-K': return cat === 'Đầu báo khói';
@@ -345,7 +379,7 @@ export default function App() {
   };
 
   const handleDeleteAllDuplicates = async () => {
-    if (!isSuperAdmin || !user) return;
+    if (!isSuperAdmin || !user) return alert("Không đủ quyền hạn hoặc chưa kết nối được Cơ sở dữ liệu.");
     if (!window.confirm("BẠN CÓ CHẮC CHẮN MƯỐN DỌN DẸP?\nHệ thống sẽ gộp số lượng các thiết bị giống hệt nhau.")) return;
     const keptSamples = new Map(); const keptOrders = new Map();
     const deletePromises = []; const updatePromises = [];
@@ -397,6 +431,7 @@ export default function App() {
 
   const handleFileUpload = (e) => {
     const file = e.target.files[0]; if (!file) return;
+    if(!user) return alert("Hệ thống chưa kết nối Cơ sở dữ liệu.");
     setIsUploading(true);
     const reader = new FileReader();
     reader.onload = async (event) => {
@@ -426,6 +461,7 @@ export default function App() {
 
   const handlePersonnelFileUpload = (e) => {
     const file = e.target.files[0]; if (!file) return;
+    if(!user) return alert("Hệ thống chưa kết nối Cơ sở dữ liệu.");
     setIsUploadingPersonnel(true);
     const reader = new FileReader();
     reader.onload = async (event) => {
@@ -450,7 +486,8 @@ export default function App() {
   };
 
   const handleAddOrder = async () => {
-    if (!newOrderData.client.trim() || !newOrderData.model.trim() || !user) return;
+    if (!newOrderData.client.trim() || !newOrderData.model.trim()) return;
+    if (!user) return alert("Hệ thống chưa kết nối Cơ sở dữ liệu. Vui lòng kiểm tra quyền truy cập Firebase.");
     const ts = Date.now();
     const reqId = `${newOrderData.client.substring(0, 3).toUpperCase()}-KĐ-${ts.toString().slice(-4)}`;
     const deadline = newOrderData.deadline ? new Date(newOrderData.deadline).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN');
@@ -489,13 +526,13 @@ export default function App() {
   };
 
   const changeGroupUrgency = async (groupId, newUrgency) => {
-    if (!canEditData) return;
+    if (!canEditData || !user) return;
     const group = groupedOrdersArr.find(g => g.groupId === groupId); if (!group) return;
     await Promise.all(group.items.map(item => updateDoc(getDocument('orders', item.id), { urgency: newUrgency })));
   };
 
   const handleRemoveTest = async (orderId, testIndex) => {
-    if (!canEditData) return;
+    if (!canEditData || !user) return;
     if (!window.confirm("Gỡ thiết bị khỏi trạm?")) return;
     const targetOrder = orders.find(o => o.id === orderId);
     const updatedTests = [...targetOrder.tests]; updatedTests.splice(testIndex, 1); 
@@ -503,6 +540,7 @@ export default function App() {
   };
 
   const changePersonnelStatus = async (id, newStatus) => {
+    if (!user) return;
     const p = personnel.find(x => x.id === id);
     const timesheet = { ...(p?.timesheet || {}) };
     timesheet[todayStr] = { ...(timesheet[todayStr] || {}), status: newStatus };
@@ -510,6 +548,7 @@ export default function App() {
   };
 
   const updatePersonnelNote = async (id, note) => {
+    if (!user) return;
     const p = personnel.find(x => x.id === id);
     const timesheet = { ...(p?.timesheet || {}) };
     timesheet[todayStr] = { ...(timesheet[todayStr] || {}), note };
@@ -517,7 +556,7 @@ export default function App() {
   };
 
   const handleAddPersonnel = async () => {
-    if (!newPersonnel.name) return; const id = 'NV' + Date.now();
+    if (!newPersonnel.name || !user) return; const id = 'NV' + Date.now();
     await setDoc(getDocument('personnel', id), { id, name: newPersonnel.name, role: newPersonnel.role, shift: newPersonnel.shift, status: 'Đang làm', timesheet: {} });
     setShowAddPersonnel(false); setNewPersonnel({ name: '', role: 'KTV', shift: 'Hành Chính' });
   };
@@ -556,7 +595,7 @@ export default function App() {
   };
 
   const handleDeleteStation = async (id, name) => {
-    if (userRole !== 'ADMIN') return;
+    if (userRole !== 'ADMIN' || !user) return;
     if (!window.confirm(`Bạn có chắc muốn xóa trạm máy "${name}" không? \nCảnh báo: Các đơn hàng đang chạy trong trạm này có thể bị mất trạng thái hiển thị!`)) return;
     await deleteDoc(getDocument('equipments', id));
   };
@@ -588,7 +627,7 @@ export default function App() {
   };
 
   const handleSaveBatchAttendance = async () => {
-      if (!user) return;
+      if (!user) return alert("Hệ thống đang tải hoặc không đủ quyền hạn. Vui lòng chờ...");
       try {
           const promises = activePersonnel.map(p => {
               const mark = attendanceBatchData[p.id];
@@ -610,7 +649,7 @@ export default function App() {
   };
 
   const handleSavePersonAttendance = async () => {
-      if (!user || !selectedAttendanceStaffId) return;
+      if (!user || !selectedAttendanceStaffId) return alert("Hệ thống đang tải hoặc không đủ quyền hạn. Vui lòng chờ...");
       try {
           const staff = activePersonnel.find(p => p.id === selectedAttendanceStaffId);
           const currentTimesheet = { ...(staff.timesheet || {}) };
@@ -628,6 +667,9 @@ export default function App() {
       } catch (error) { alert("Có lỗi xảy ra khi lưu chấm công!"); }
   };
 
+  // =========================================================================
+  // 7. XUẤT PDF VÀ HTML IN
+  // =========================================================================
   const handleExportPDF = () => {
     if (!window.html2pdf) { window.print(); return; }
     const container = document.createElement('div');
@@ -687,23 +729,14 @@ export default function App() {
                     <th style="border:1px solid #cbd5e1; padding:8px; text-align:center;">Ca Làm Việc</th>
                     <th style="border:1px solid #cbd5e1; padding:8px; text-align:center;">Trạng Thái Hiện Tại</th>
                 </tr>
-                ${activePersonnel.map(p => {
-                    let displayStatus = p.status === 'Làm việc' ? 'Đang làm' : (p.status === 'Nghỉ' ? 'Nghỉ phép' : p.status);
-                    if (isTodaySunday && p.timesheet?.[todayStr]?.status !== 'Đang làm' && p.timesheet?.[todayStr]?.status !== 'Part-time') displayStatus = 'Nghỉ CN (Hết giờ)';
-                    else if (isTodaySunday && p.timesheet?.[todayStr]?.status === 'Đang làm') displayStatus = 'Tăng ca CN';
-                    else if (p.timesheet?.[todayStr]?.status) {
-                        const st = p.timesheet[todayStr].status;
-                        if(st === 'Part-time') displayStatus = 'Part-time (' + (p.timesheet[todayStr].note?.match(/(\d+)/)?.[1] || '4') + 'H)';
-                        else displayStatus = st;
-                    }
-                    return `
+                ${activePersonnel.map(p => `
                     <tr>
                         <td style="border:1px solid #cbd5e1; padding:8px; font-weight:bold;">${p.name}</td>
                         <td style="border:1px solid #cbd5e1; padding:8px;">${p.role}</td>
                         <td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">${p.shift}</td>
-                        <td style="border:1px solid #cbd5e1; padding:8px; text-align:center; font-weight:bold;">${displayStatus}</td>
+                        <td style="border:1px solid #cbd5e1; padding:8px; text-align:center; font-weight:bold;">${getPersonnelDisplayStatus(p, todayStr)}</td>
                     </tr>
-                `}).join('')}
+                `).join('')}
             </table>
         `;
     } else if (activeTab === 'equipment') {
@@ -750,27 +783,21 @@ export default function App() {
     window.html2pdf().set(opt).from(container).save();
   };
 
-  const handleMonthlyPrintHtml2Pdf = () => {
-    if (!window.html2pdf) { window.print(); setIsPrintingMonthly(false); setShowPrintModal(false); return; }
-    setIsPrintingMonthly(true);
-    
+  const renderMonthlyPrintContent = () => {
     let tableRows = activePersonnel.map((p, index) => {
         let totalCong = 0; const notes = [];
         const cells = printDaysArray.map(dateStr => {
-            const dayData = p.timesheet?.[dateStr];
-            const status = dayData?.status;
             let mark = '';
+            const dispStatus = getPersonnelDisplayStatus(p, dateStr);
             
-            if (status === 'Đang làm' || status === 'Làm việc') { 
-                mark = isSundayStr(dateStr) ? 'TC' : 'X'; 
-                totalCong += 1; 
-            } 
-            else if (status === 'Nghỉ phép' || status === 'Nghỉ') mark = 'P';
-            else if (status === 'Part-time') { mark = 'Ca'; totalCong += 0.5; }
-            else if (status === 'Vắng mặt' || status === 'Nghỉ không phép') mark = 'V';
-            else if (isSundayStr(dateStr)) mark = '-'; 
+            if (dispStatus === 'Đang làm') { mark = 'X'; totalCong += 1; }
+            else if (dispStatus.includes('Tăng ca')) { mark = 'TC'; totalCong += 1; }
+            else if (dispStatus.includes('Nghỉ phép')) mark = 'P';
+            else if (dispStatus.includes('Part-time')) { mark = 'Ca'; totalCong += 0.5; }
+            else if (dispStatus.includes('Nghỉ CN') || dispStatus.includes('Nghỉ T7')) mark = '-';
+            else mark = 'V'; 
             
-            if (dayData?.note) notes.push(`Ngày ${dateStr.split('-')[2]}: ${dayData.note}`);
+            if (p.timesheet?.[dateStr]?.note) notes.push(`Ngày ${dateStr.split('-')[2]}: ${p.timesheet[dateStr].note}`);
             
             let cellColor = isSundayStr(dateStr) ? 'background-color:#f8fafc;' : '';
             if (mark === 'TC') cellColor += 'color:#10b981;'; 
@@ -793,7 +820,7 @@ export default function App() {
         return `<th style="border:1px solid #000; padding:2px; width:15px; ${isSun ? 'background-color:#fee2e2; color:#be123c;' : ''}">${i + 1}</th>`;
     }).join('');
 
-    const htmlContent = `
+    return `
         <div style="font-family: Arial, sans-serif; background:white; color:black; padding:20px;">
             <h1 style="text-align:center; font-size:18px; margin-bottom:5px;">CÔNG TY / PHÒNG THÍ NGHIỆM PCCC</h1>
             <h2 style="text-align:center; font-size:14px; margin-top:0;">BẢNG CHẤM CÔNG THÁNG ${printMonth}/${printYear}</h2>
@@ -809,22 +836,26 @@ export default function App() {
                 </tr>
                 ${tableRows}
             </table>
-            <div style="margin-top:15px; font-size:9px; font-style:italic;">* Ký hiệu: X (Đi làm/Hành chính) | TC (Tăng ca CN) | Ca (Part-time) | P (Nghỉ phép) | V (Vắng mặt) | - (Nghỉ CN)</div>
+            <div style="margin-top:15px; font-size:9px; font-style:italic;">* Ký hiệu: X (Đi làm/Hành chính) | TC (Tăng ca CN/T7) | Ca (Part-time) | P (Nghỉ phép) | V (Vắng mặt) | - (Nghỉ CN/T7)</div>
             <div style="display:flex; justify-content:space-around; margin-top:30px;">
                 <div style="text-align:center;"><p style="font-weight:bold; font-size:12px; margin-bottom:40px;">Người lập bảng</p><p style="font-size:10px;">(Ký và ghi rõ họ tên)</p></div>
                 <div style="text-align:center;"><p style="font-weight:bold; font-size:12px; margin-bottom:40px;">Quản lý / Giám đốc</p><p style="font-size:10px;">(Ký và ghi rõ họ tên)</p></div>
             </div>
         </div>
     `;
+  };
 
+  const handleMonthlyPrintHtml2Pdf = () => {
+    if (!window.html2pdf) { window.print(); setIsPrintingMonthly(false); setShowPrintModal(false); return; }
+    setIsPrintingMonthly(true);
     const container = document.createElement('div');
-    container.innerHTML = htmlContent;
+    container.innerHTML = renderMonthlyPrintContent();
     const opt = { margin: 5, filename: `BangChamCong_T${printMonth}_${printYear}.pdf`, image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' } };
     window.html2pdf().set(opt).from(container).save().then(() => { setIsPrintingMonthly(false); setShowPrintModal(false); });
   };
 
   // =========================================================================
-  // GIAO DIỆN ĐĂNG NHẬP / MÀN HÌNH CHỜ
+  // 8. MÀN HÌNH ĐĂNG NHẬP / CHỜ
   // =========================================================================
   if (!userRole) {
     return (
@@ -853,23 +884,33 @@ export default function App() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-[#050b14]">
-        <Loader2 size={40} className="text-cyan-500 animate-spin mb-4" />
-        <p className="text-cyan-600 font-mono tracking-[0.2em] uppercase text-xs animate-pulse">Đang kết nối đến CSDL PCCC...</p>
+      <div className="min-h-screen bg-[#050b14] flex flex-col items-center justify-center p-4">
+        {authError ? (
+           <div className="bg-rose-950/50 border border-rose-900 p-6 rounded text-center max-w-md">
+             <AlertTriangle size={40} className="text-rose-500 mx-auto mb-4" />
+             <h3 className="text-rose-400 font-bold font-mono mb-2">LỖI XÁC THỰC CƠ SỞ DỮ LIỆU</h3>
+             <p className="text-rose-200/70 text-xs font-mono">{authError}</p>
+           </div>
+        ) : (
+           <>
+             <Loader2 size={40} className="text-cyan-500 animate-spin mb-4" />
+             <p className="text-cyan-600 font-mono tracking-[0.2em] uppercase text-xs animate-pulse">Đang kết nối đến CSDL PCCC...</p>
+           </>
+        )}
       </div>
     );
   }
 
   // =========================================================================
-  // GIAO DIỆN CHÍNH
+  // 9. GIAO DIỆN APP CHÍNH
   // =========================================================================
   return (
     <>
-    <style dangerouslySetInnerHTML={{__html: `.custom-scrollbar::-webkit-scrollbar { width: 6px; } .custom-scrollbar::-webkit-scrollbar-track { background: #050b14; } .custom-scrollbar::-webkit-scrollbar-thumb { background: #164e63; border-radius: 4px; } .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #0891b2; }`}} />
+    <style dangerouslySetInnerHTML={{__html: `.custom-scrollbar::-webkit-scrollbar { width: 6px; } .custom-scrollbar::-webkit-scrollbar-track { background: #050b14; } .custom-scrollbar::-webkit-scrollbar-thumb { background: #164e63; border-radius: 4px; } .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #0891b2; } @media print { @page { size: landscape; margin: 10mm; } body, main, div { background: white !important; color: black !important; border-color: #ccc !important; box-shadow: none !important; text-shadow: none !important; } .print\\:hidden { display: none !important; } .print\\:block { display: block !important; } .print\\:text-black { color: black !important; } .print\\:border-black { border-color: black !important; } * { color: black !important; } }`}} />
 
     {/* MODAL CẤU HÌNH IN PDF THÁNG */}
     {showPrintModal && (
-        <div className="fixed inset-0 bg-[#050b14]/90 z-[200] flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-[#050b14]/90 z-[9999] flex items-center justify-center p-4 print:hidden">
             <div className="bg-[#0b1221] border border-cyan-800 p-6 rounded-md shadow-[0_0_20px_rgba(6,182,212,0.2)] w-full max-w-sm">
                 <h2 className="text-cyan-400 font-bold font-mono mb-4 text-center tracking-widest">CẤU_HÌNH_XUẤT_PDF</h2>
                 <div className="flex gap-4 mb-6">
@@ -890,7 +931,7 @@ export default function App() {
         </div>
     )}
 
-    {/* MODAL LỊCH CHẤM CÔNG HÀNG LOẠT (Z-INDEX CAO NHẤT ĐỂ KHÔNG BỊ MENU CHE) */}
+    {/* MODAL LỊCH CHẤM CÔNG HÀNG LOẠT */}
     {showAttendanceCalendar && isSuperAdmin && (() => {
         const year = attendanceViewDate.getFullYear(); const month = attendanceViewDate.getMonth();
         const daysInMonth = new Date(year, month + 1, 0).getDate(); const firstDay = new Date(year, month, 1).getDay();
@@ -900,7 +941,7 @@ export default function App() {
         for (let i = 1; i <= daysInMonth; i++) calendarDays.push(getLocalYYYYMMDD(new Date(year, month, i)));
 
         return (
-       <div className="fixed inset-0 bg-[#050b14]/95 backdrop-blur-md z-[100] flex flex-col w-full h-full overflow-hidden animate-in fade-in">
+       <div className="fixed inset-0 bg-[#050b14]/95 backdrop-blur-md z-[9999] flex flex-col w-full h-full overflow-hidden animate-in fade-in print:hidden">
           <div className="bg-[#0b1221] flex justify-between items-center p-4 border-b border-cyan-900/50 shrink-0">
               <div className="flex items-center gap-3">
                   <CalendarCheck size={24} className="text-cyan-500"/>
@@ -1084,7 +1125,10 @@ export default function App() {
        </div>
     )})()}
 
-    <div className={`flex h-screen w-full bg-[#050b14] font-sans overflow-hidden text-slate-300 selection:bg-cyan-900 selection:text-cyan-100 bg-[linear-gradient(rgba(6,182,212,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(6,182,212,0.03)_1px,transparent_1px)] bg-[size:40px_40px]`}>
+    {/* BẢNG CHẤM CÔNG THÁNG IN ẨN */}
+    <div className={`hidden ${isPrintingMonthly ? 'print:block' : ''} bg-white w-full text-black font-sans`} dangerouslySetInnerHTML={{ __html: renderMonthlyPrintContent() }}></div>
+
+    <div className={`flex h-screen w-full bg-[#050b14] font-sans overflow-hidden text-slate-300 selection:bg-cyan-900 selection:text-cyan-100 bg-[linear-gradient(rgba(6,182,212,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(6,182,212,0.03)_1px,transparent_1px)] ${isPrintingMonthly ? 'hidden' : ''}`}>
       
       {/* 💻 SIDEBAR KỸ THUẬT */}
       <aside className="hidden md:flex flex-col w-60 bg-[#0b1221]/90 backdrop-blur-md z-20 border-r border-cyan-900/50 transition-all duration-300 shadow-[5px_0_25px_rgba(0,0,0,0.5)]">
@@ -1129,7 +1173,7 @@ export default function App() {
         </div>
       </aside>
 
-      {/* 📱 KHU VỰC MAIN CONTENT */}
+      {/* 📱 KHU VỰC MAIN CONTENT TRÀN VIỀN */}
       <div className="flex-1 flex flex-col h-screen overflow-hidden relative z-10 w-full">
         
         {/* HEADER CÔNG NGHỆ */}
@@ -1146,6 +1190,7 @@ export default function App() {
           
           <div className="flex items-center gap-3 md:gap-6 font-mono">
              <div className="h-6 w-px bg-cyan-900/50 hidden md:block"></div>
+             
              <div className="flex flex-col text-right">
                 <div className="text-sm font-black text-cyan-400">{currentTime.toLocaleTimeString('vi-VN')}</div>
                 <div className="text-[9px] text-cyan-700 uppercase font-bold tracking-[0.2em]">{currentTime.toLocaleDateString('vi-VN')}</div>
@@ -1158,12 +1203,12 @@ export default function App() {
           </div>
         </header>
 
-        {/* NỘI DUNG CHÍNH TRÀN VIỀN */}
+        {/* NỘI DUNG CHÍNH (W-FULL) */}
         <main className="flex-1 p-3 md:p-6 overflow-y-auto pb-24 md:pb-8 scroll-smooth w-full">
           
           {/* TAB 1: DASHBOARD */}
           {activeTab === 'dashboard' && (
-            <div className="space-y-6 w-full">
+            <div className="space-y-6 w-full print:hidden">
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                  <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div onClick={() => {setOrderModalFilter('Quá hạn'); setShowOrderModal(true);}} className="cursor-pointer bg-[#0b1221] p-6 rounded-md border border-rose-900 hover:border-rose-500/80 hover:shadow-[0_0_20px_rgba(244,63,94,0.2)] transition-all flex flex-col justify-center items-center text-center relative overflow-hidden h-full group">
@@ -1287,8 +1332,8 @@ export default function App() {
 
           {/* TAB 2: QUẢN LÝ ĐƠN HÀNG */}
           {activeTab === 'orders' && (
-            <div className="w-full flex flex-col h-full">
-              <div className="flex flex-col md:flex-row gap-3 mb-4">
+            <div className="w-full flex flex-col h-full print:block">
+              <div className="flex flex-col md:flex-row gap-3 mb-4 print:hidden">
                  <div className="relative flex-1">
                     <input type="text" placeholder="TÌM KHÁCH HÀNG, MODEL, MÃ..." value={orderSearchTerm} onChange={(e) => setOrderSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 rounded-md bg-[#050b14] border border-cyan-900/50 text-cyan-400 placeholder-cyan-900/50 focus:outline-none focus:border-cyan-400 font-mono text-xs"/>
                     <Search size={16} className="absolute left-3 top-3 text-cyan-700" />
@@ -1301,7 +1346,7 @@ export default function App() {
               </div>
 
               {showAddOrder && isSuperAdmin && (
-                 <div className="bg-[#0b1221] p-4 lg:p-6 rounded-md border border-cyan-800 shadow-md mb-6 animate-in slide-in-from-top-4 font-mono">
+                 <div className="bg-[#0b1221] p-4 lg:p-6 rounded-md border border-cyan-800 shadow-md mb-6 animate-in slide-in-from-top-4 print:hidden font-mono">
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-4 font-mono">
                         <input type="text" placeholder="Khách hàng..." value={newOrderData.client} onChange={e => setNewOrderData({...newOrderData, client: e.target.value})} className="bg-[#050b14] border border-cyan-900/50 p-2.5 rounded text-xs text-cyan-400 focus:border-cyan-400 outline-none" />
                         <input type="text" placeholder="Model thiết bị..." value={newOrderData.model} onChange={e => setNewOrderData({...newOrderData, model: e.target.value})} className="bg-[#050b14] border border-cyan-900/50 p-2.5 rounded text-xs text-cyan-400 focus:border-cyan-400 outline-none" />
@@ -1321,44 +1366,44 @@ export default function App() {
                  </div>
               )}
 
-              <div className="flex-1 overflow-y-auto space-y-4 pb-10 custom-scrollbar">
+              <div className="flex-1 overflow-y-auto space-y-4 print:space-y-6 print:overflow-visible pb-10 custom-scrollbar print:text-black">
                  {groupedOrdersArr.length === 0 && <p className="text-center text-slate-500 font-mono mt-10">KHÔNG CÓ DỮ LIỆU.</p>}
-                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">
+                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 print:grid-cols-1 print:gap-4 print:text-black">
                    {groupedOrdersArr.map(group => {
                      const itemsByType = {};
                      group.items.forEach(item => { if(!itemsByType[item.type]) itemsByType[item.type] = []; itemsByType[item.type].push(item); });
                      let borderColor = group.urgency === 'Gấp' || group.urgency === 'Quá hạn' ? 'border-rose-900/50 bg-[#0b1221]' : (group.urgency === 'Mới' ? 'border-emerald-900/50 bg-[#0b1221]' : 'border-slate-800 bg-[#0b1221]');
 
                      return (
-                       <div key={group.groupId} className={`p-4 rounded-md border ${borderColor} flex flex-col`}>
-                         <div className="flex justify-between items-start border-b border-slate-800 pb-3 mb-3">
+                       <div key={group.groupId} className={`p-4 rounded-md border ${borderColor} flex flex-col print:border-black print:bg-white print:text-black`}>
+                         <div className="flex justify-between items-start border-b border-slate-800 pb-3 mb-3 print:border-black">
                            <div className="flex-1">
-                             <div className="flex flex-wrap items-center gap-2 mb-1"><span className="text-[10px] font-black text-cyan-400 bg-cyan-950 px-2 py-0.5 rounded border border-cyan-800 tracking-widest font-mono">SYS: {group.reqId}</span></div>
-                             <h3 className="font-bold text-slate-200 text-sm">{group.client}</h3>
+                             <div className="flex flex-wrap items-center gap-2 mb-1"><span className="text-[10px] font-black text-cyan-400 bg-cyan-950 px-2 py-0.5 rounded border border-cyan-800 tracking-widest font-mono print:text-black print:border-black print:bg-transparent">SYS: {group.reqId}</span></div>
+                             <h3 className="font-bold text-slate-200 text-sm print:text-black">{group.client}</h3>
                            </div>
                            <div className="flex flex-col items-end gap-1 shrink-0 pl-2">
-                             <span className="text-[9px] font-bold text-slate-500 font-mono"><Calendar size={10} className="inline"/> {group.deadline}</span>
-                             <span className="text-xs font-bold text-cyan-500 font-mono">{group.progress}% HOÀN_TẤT</span>
+                             <span className="text-[9px] font-bold text-slate-500 font-mono"><Calendar size={10} className="inline print:text-black"/> {group.deadline}</span>
+                             <span className="text-xs font-bold text-cyan-500 font-mono print:text-black">{group.progress}% HOÀN_TẤT</span>
                            </div>
                          </div>
                          <div className="space-y-3 flex-1 overflow-y-auto custom-scrollbar">
                            {Object.entries(itemsByType).map(([type, items]) => (
-                             <div key={type} className="bg-[#050b14]/50 rounded border border-slate-800 overflow-hidden">
-                               <div className="bg-slate-900/50 px-3 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-800 font-mono"><Layers size={10} className="inline mr-1"/>{type}</div>
+                             <div key={type} className="bg-[#050b14]/50 rounded border border-slate-800 overflow-hidden print:border-black print:bg-white">
+                               <div className="bg-slate-900/50 px-3 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-800 font-mono print:text-black print:bg-transparent print:border-black"><Layers size={10} className="inline mr-1"/>{type}</div>
                                <div className="p-2 space-y-2">
                                  {items.map(item => {
                                    const statusInfo = getItemStatus(item);
                                    return (
-                                     <div key={item.id} className="flex flex-col gap-2 border-b border-slate-800/50 last:border-0 pb-3 last:pb-0 pt-1">
+                                     <div key={item.id} className="flex flex-col gap-2 border-b border-slate-800/50 last:border-0 pb-3 last:pb-0 pt-1 print:border-black">
                                        <div className="flex justify-between items-start">
                                          <div className="flex-1 pr-2">
-                                            <span className="text-xs font-semibold text-slate-300">{item.model}</span>
-                                            <div className="text-[9px] text-slate-500 font-mono">SL: <b className="text-cyan-500">{item.sampleSize}</b></div>
+                                            <span className="text-xs font-semibold text-slate-300 print:text-black">{item.model}</span>
+                                            <div className="text-[9px] text-slate-500 font-mono print:text-black">SL: <b className="text-cyan-500 print:text-black">{item.sampleSize}</b></div>
                                          </div>
                                          <div className="flex flex-col items-end gap-1.5">
-                                            <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border font-mono tracking-wider ${statusInfo.color}`}>{statusInfo.text}</span>
+                                            <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border font-mono tracking-wider ${statusInfo.color} print:text-black print:border-black print:bg-transparent`}>{statusInfo.text}</span>
                                             {isSuperAdmin && (
-                                              <div className="flex items-center gap-2 opacity-30 hover:opacity-100 transition-opacity">
+                                              <div className="flex items-center gap-2 opacity-30 hover:opacity-100 transition-opacity print:hidden">
                                                  {confirmDeleteOrderId === item.id ? (
                                                      <div className="flex items-center gap-1 bg-rose-950/50 p-0.5 rounded"><button onClick={() => handleDeleteOrder(item.id)} className="bg-rose-600 text-white p-1 rounded"><Check size={10}/></button><button onClick={() => setConfirmDeleteOrderId(null)} className="bg-slate-700 p-1 rounded"><X size={10}/></button></div>
                                                  ) : (<button onClick={() => setConfirmDeleteOrderId(item.id)} className="text-rose-500 p-1 rounded"><Trash2 size={12}/></button>)}
@@ -1383,8 +1428,8 @@ export default function App() {
 
           {/* TAB 3: DỮ LIỆU KHO HÀNG */}
           {activeTab === 'inventory' && (
-             <div className="space-y-4 lg:space-y-6 w-full h-full flex flex-col">
-               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 md:gap-4">
+             <div className="space-y-4 lg:space-y-6 print:block w-full h-full flex flex-col print:text-black">
+               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 md:gap-4 print:hidden">
                  <div className="w-full md:w-1/2 lg:w-1/3 relative flex gap-2">
                    <div className="relative flex-1">
                      <input type="text" placeholder="TÌM KIẾM MODEL, KHÁCH HÀNG..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 rounded-md bg-[#050b14] border border-cyan-900/50 text-cyan-400 placeholder-cyan-900/50 focus:outline-none focus:border-cyan-400 font-mono text-xs shadow-inner"/>
@@ -1405,13 +1450,13 @@ export default function App() {
                    </div>
                  )}
                </div>
-               <div className="flex-1 overflow-y-auto pb-10 custom-scrollbar">
-                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 md:gap-4">
+               <div className="flex-1 overflow-y-auto pb-10 custom-scrollbar print:overflow-visible">
+                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 md:gap-4 print:grid-cols-2 print:gap-4">
                    {samplesInStock.filter(s => (s.model||'').toLowerCase().includes(searchTerm.toLowerCase()) || (s.client||'').toLowerCase().includes(searchTerm.toLowerCase())).map((sample) => {
                      const isDuplicate = checkIsDuplicate(sample.client, sample.type, sample.model);
                      const isEditing = editingSampleId === sample.id;
                      return (
-                       <div key={sample.id} className={`p-3 md:p-4 rounded-md border transition ${isDuplicate ? 'bg-rose-950/20 border-rose-900/50' : 'bg-[#0b1221] border-slate-800 hover:border-cyan-900'}`}>
+                       <div key={sample.id} className={`p-3 md:p-4 rounded-md border transition print:border-black print:bg-white print:text-black ${isDuplicate ? 'bg-rose-950/20 border-rose-900/50 print:bg-white' : 'bg-[#0b1221] border-slate-800 hover:border-cyan-900'}`}>
                          <div className="flex justify-between items-start h-full">
                            {isEditing ? (
                               <div className="flex-1 space-y-2 pr-2 font-mono">
@@ -1423,18 +1468,18 @@ export default function App() {
                            ) : (
                              <div className="flex-1 flex flex-col h-full justify-between pr-2">
                                <div>
-                                  <div className="flex items-start gap-2 mb-1"><h3 className={`font-bold text-sm leading-tight ${isDuplicate ? 'text-rose-400' : 'text-slate-200'}`}>{sample.model}</h3></div>
-                                  <p className="text-[10px] text-slate-500 font-mono tracking-wider mb-1">{sample.client}</p>
-                                  <p className="text-[9px] text-slate-600 font-mono">{sample.type}</p>
+                                  <div className="flex items-start gap-2 mb-1"><h3 className={`font-bold text-sm leading-tight print:text-black ${isDuplicate ? 'text-rose-400' : 'text-slate-200'}`}>{sample.model}</h3></div>
+                                  <p className="text-[10px] text-slate-500 font-mono tracking-wider mb-1 print:text-black">{sample.client}</p>
+                                  <p className="text-[9px] text-slate-600 font-mono print:text-black">{sample.type}</p>
                                </div>
                                <div className="mt-3 flex items-center justify-between font-mono">
-                                  <span className="text-[10px] font-black text-cyan-400 bg-cyan-950/50 border border-cyan-900 px-2 py-0.5 rounded">SL: {sample.qty}</span>
-                                  {isDuplicate && <span className="text-[8px] font-bold text-rose-300 bg-rose-950/50 border border-rose-800 px-1.5 py-0.5 rounded flex items-center gap-1"><AlertTriangle size={8}/> TRÙNG_LẶP</span>}
+                                  <span className="text-[10px] font-black text-cyan-400 bg-cyan-950/50 border border-cyan-900 px-2 py-0.5 rounded print:bg-transparent print:border-black print:text-black">SL: {sample.qty}</span>
+                                  {isDuplicate && <span className="text-[8px] font-bold text-rose-300 bg-rose-950/50 border border-rose-800 px-1.5 py-0.5 rounded flex items-center gap-1 print:hidden"><AlertTriangle size={8}/> TRÙNG_LẶP</span>}
                                </div>
                              </div>
                            )}
                            {canEditData && (
-                             <div>
+                             <div className="print:hidden">
                                {confirmDeleteSampleId === sample.id ? (
                                  <div className="flex flex-col gap-1 items-end shrink-0 bg-[#050b14] p-1 rounded border border-rose-900/50">
                                    <span className="text-[8px] text-rose-500 font-mono">XÁC_NHẬN_XÓA?</span>
@@ -1475,8 +1520,8 @@ export default function App() {
             const totalWaiting = eqStats.reduce((sum, eq) => sum + eq.waitingCount, 0);
 
              return (
-               <div className="space-y-6 w-full h-full flex flex-col">
-                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
+               <div className="space-y-6 print:hidden w-full h-full flex flex-col">
+                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 print:hidden">
                     <h2 className="text-xl font-bold text-cyan-50 md:hidden font-mono tracking-widest">TRẠM MÁY</h2>
                     <div className="flex gap-2 w-full md:w-auto flex-wrap font-mono md:ml-auto">
                        {canEditData && (
@@ -1515,7 +1560,7 @@ export default function App() {
                     </div>
                  </div>
 
-                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 flex-1 overflow-y-auto pb-10 custom-scrollbar">
+                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 pb-10">
                    {equipments.map(eq => {
                      const { running, waiting, history } = getTestsForStation(eq.id);
                      const isAssigning = assigningStation === eq.id;
@@ -1588,7 +1633,7 @@ export default function App() {
                             </div>
 
                             {isAssigning && (() => {
-                              const compatibleOrders = orders.filter(o => isDeviceCompatibleWithStation(eq.id, o.type) && !(o.tests || []).some(t => t && t.equip === eq.id && (t.status === 'Đang chạy' || t.status === 'Chờ chạy')));
+                              const compatibleOrders = orders.filter(o => isDeviceCompatibleWithStationCheck(eq.id, o.type) && !(o.tests || []).some(t => t && t.equip === eq.id && (t.status === 'Đang chạy' || t.status === 'Chờ chạy')));
                               return (
                                 <div className="p-3 bg-indigo-950/30 border-b border-indigo-900 flex flex-col gap-2 font-mono shrink-0">
                                   <select className="w-full text-[10px] bg-[#050b14] border border-indigo-800 text-indigo-300 rounded p-1.5 outline-none" value={selectedOrderIdToAssign} onChange={(e) => setSelectedOrderIdToAssign(e.target.value)}>
@@ -1712,10 +1757,10 @@ export default function App() {
                          </div>
 
                          {isAssigning && (() => {
-                           const compatibleOrders = orders.filter(o => isDeviceCompatibleWithStation(eq.id, o.type) && !(o.tests || []).some(t => t && t.equip === eq.id && (t.status === 'Đang chạy' || t.status === 'Chờ chạy')));
+                           const compatibleOrders = orders.filter(o => isDeviceCompatibleWithStationCheck(eq.id, o.type) && !(o.tests || []).some(t => t && t.equip === eq.id && (t.status === 'Đang chạy' || t.status === 'Chờ chạy')));
                            return (
                              <div className="p-3 bg-cyan-950/20 border-b border-cyan-900/50 flex flex-col gap-2 font-mono shrink-0">
-                               <select className="w-full text-[10px] bg-[#050b14] border border-cyan-800 text-cyan-400 rounded p-1.5 outline-none" value={selectedOrderIdToAssign} onChange={(e) => setSelectedOrderIdToAssign(e.target.value)}>
+                               <select className="w-full text-[10px] bg-[#050b14] border border-indigo-800 text-indigo-300 rounded p-1.5 outline-none" value={selectedOrderIdToAssign} onChange={(e) => setSelectedOrderIdToAssign(e.target.value)}>
                                  <option value="">-- CHỌN MỤC TIÊU --</option>
                                  {compatibleOrders.length === 0 ? <option value="" disabled>KHÔNG_CÓ_TB_TƯƠNG_THÍCH</option> : compatibleOrders.map(o => <option key={o.id} value={o.id}>[{o.reqId}] {o.model} (SL: {o.sampleSize})</option>)}
                                </select>
@@ -1820,28 +1865,14 @@ export default function App() {
                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 print:grid-cols-2 print:gap-4 print:text-black">
                    {activePersonnel.map((p) => {
                      const isEditing = editingPersonnelId === p.id;
-                     
-                     // ĐIỀU CHỈNH LOGIC CHỦ NHẬT (CHỈ ẢNH HƯỞNG HIỂN THỊ)
-                     let displayStatus = p.status === 'Làm việc' ? 'Đang làm' : (p.status === 'Nghỉ' ? 'Nghỉ phép' : p.status);
-                     if (isTodaySunday && p.timesheet?.[todayStr]?.status !== 'Đang làm' && p.timesheet?.[todayStr]?.status !== 'Part-time') {
-                         displayStatus = 'Nghỉ CN (Hết giờ)';
-                     } else if (isTodaySunday && p.timesheet?.[todayStr]?.status === 'Đang làm') {
-                         displayStatus = 'Tăng ca CN';
-                     } else if (p.timesheet?.[todayStr]?.status) {
-                         const st = p.timesheet?.[todayStr]?.status;
-                         if(st === 'Part-time') {
-                             displayStatus = 'Part-time (' + (p.timesheet?.[todayStr]?.note?.match(/(\d+)/)?.[1] || '4') + 'H)';
-                         } else {
-                             displayStatus = st;
-                         }
-                     }
+                     const displayStatus = getPersonnelDisplayStatus(p, todayStr);
                      
                      return (
-                       <div key={p.id} className={`p-4 rounded border flex flex-col transition print:border-black print:bg-white print:text-black ${(displayStatus === 'Nghỉ phép' || displayStatus === 'Nghỉ CN (Hết giờ)') ? 'bg-rose-950/10 border-rose-900/30' : 'bg-[#0b1221] border-cyan-900/30 hover:border-cyan-700'}`}>
+                       <div key={p.id} className={`p-4 rounded border flex flex-col transition print:border-black print:bg-white print:text-black ${(displayStatus.includes('Nghỉ')) ? 'bg-rose-950/10 border-rose-900/30' : 'bg-[#0b1221] border-cyan-900/30 hover:border-cyan-700'}`}>
                          <div className="flex justify-between items-start mb-3">
                            <div className="flex gap-3 items-center w-full pr-2">
-                             <div className={`p-2 rounded border ${(displayStatus === 'Nghỉ phép' || displayStatus === 'Nghỉ CN (Hết giờ)') ? 'bg-rose-950/30 border-rose-800 text-rose-500' : 'bg-cyan-950/30 border-cyan-800 text-cyan-500'} print:bg-transparent print:border-black print:text-black`}>
-                               {(displayStatus === 'Nghỉ phép' || displayStatus === 'Nghỉ CN (Hết giờ)') ? <UserMinus size={16} /> : <UserCheck size={16} />}
+                             <div className={`p-2 rounded border ${(displayStatus.includes('Nghỉ')) ? 'bg-rose-950/30 border-rose-800 text-rose-500' : 'bg-cyan-950/30 border-cyan-800 text-cyan-500'} print:bg-transparent print:border-black print:text-black`}>
+                               {(displayStatus.includes('Nghỉ')) ? <UserMinus size={16} /> : <UserCheck size={16} />}
                              </div>
                              
                              {isEditing ? (
@@ -1885,10 +1916,10 @@ export default function App() {
                          <div className="mt-auto">
                            {!isEditing && canEditData && (
                              <div className="flex gap-2 mb-3 print:hidden font-mono tracking-widest">
-                                <button onClick={() => changePersonnelStatus(p.id, 'Đang làm')} className={`flex-1 text-[9px] py-1.5 rounded font-bold border transition ${displayStatus === 'Đang làm' || displayStatus === 'Tăng ca CN' ? 'bg-cyan-900/30 text-cyan-400 border-cyan-600' : 'bg-transparent text-slate-500 border-slate-800 hover:border-slate-600'}`}>
-                                    {isTodaySunday ? 'ĐĂNG KÝ TĂNG CA' : 'ĐANG_LÀM'}
+                                <button onClick={() => changePersonnelStatus(p.id, 'Đang làm')} className={`flex-1 text-[9px] py-1.5 rounded font-bold border transition ${displayStatus.includes('Đang làm') || displayStatus.includes('Tăng ca') ? 'bg-cyan-900/30 text-cyan-400 border-cyan-600' : 'bg-transparent text-slate-500 border-slate-800 hover:border-slate-600'}`}>
+                                    {isTodaySunday || (isSaturdayStr(todayStr) && isHanhChinh(p)) ? 'ĐK_TĂNG_CA' : 'ĐANG_LÀM'}
                                 </button>
-                                <button onClick={() => changePersonnelStatus(p.id, 'Nghỉ phép')} className={`flex-1 text-[9px] py-1.5 rounded font-bold border transition ${displayStatus === 'Nghỉ phép' || displayStatus === 'Nghỉ CN (Hết giờ)' ? 'bg-rose-900/30 text-rose-400 border-rose-600' : 'bg-transparent text-slate-500 border-slate-800 hover:border-slate-600'}`}>NGHỈ_PHÉP</button>
+                                <button onClick={() => changePersonnelStatus(p.id, 'Nghỉ phép')} className={`flex-1 text-[9px] py-1.5 rounded font-bold border transition ${displayStatus === 'Nghỉ phép' || displayStatus.includes('Nghỉ CN') || displayStatus.includes('Nghỉ T7') ? 'bg-rose-900/30 text-rose-400 border-rose-600' : 'bg-transparent text-slate-500 border-slate-800 hover:border-slate-600'}`}>NGHỈ_PHÉP</button>
                                 {isSuperAdmin && <button onClick={() => { if(window.confirm(`Cho nghỉ việc?`)) changePersonnelStatus(p.id, 'Đã nghỉ việc'); }} className="px-2 text-slate-600 hover:text-rose-500 rounded border border-slate-800 hover:border-rose-900"><UserX size={12}/></button>}
                              </div>
                            )}
@@ -1909,7 +1940,7 @@ export default function App() {
         </main>
       </div>
 
-      {/* 📱 BOTTOM NAV MOBILE (Z-INDEX 50) */}
+      {/* 📱 BOTTOM NAV MOBILE */}
       <nav className="md:hidden bg-[#0b1221]/95 backdrop-blur-md border-t border-cyan-900/50 fixed bottom-0 left-0 w-full flex justify-between px-2 py-2 pb-safe z-50 shadow-[0_-10px_30px_rgba(6,182,212,0.1)] print:hidden">
          {navItems.map(item => {
             const Icon = item.icon; const isActive = activeTab === item.id;
