@@ -9,8 +9,11 @@ import {
 } from 'lucide-react';
 
 // =========================================================================
-// 🚀 1. CẤU HÌNH FIREBASE GỐC (KẾT NỐI TRỰC TIẾP 100% VÀO DB CỦA BẠN)
+// 🚀 1. CẤU HÌNH FIREBASE TỰ ĐỘNG (CANVAS VÀ NETLIFY)
 // =========================================================================
+const isCanvasEnv = typeof __firebase_config !== 'undefined';
+const sysAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
 const fallbackConfig = {
   apiKey: "AIzaSyCoYYrj_cuqwm_5N0NQLUCEzKGh7DYheDE",
   authDomain: "app-ptn-pccc.firebaseapp.com",
@@ -20,17 +23,16 @@ const fallbackConfig = {
   appId: "1:1070884929418:web:aa64e2aac0b01b53821273"
 };
 
-const firebaseConfig = typeof __firebase_config !== 'undefined' && Object.keys(JSON.parse(__firebase_config || '{}')).length > 0 
-  ? JSON.parse(__firebase_config) 
-  : fallbackConfig;
+// Nếu ở Canvas, sử dụng config tạm của AI. Nếu ở Netlify, dùng config gốc.
+const firebaseConfig = isCanvasEnv ? JSON.parse(__firebase_config) : fallbackConfig;
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// Trỏ thẳng vào thư mục gốc của Firebase, KHÔNG dùng bất kỳ đường dẫn ảo nào.
-const getCol = (colName) => collection(db, colName);
-const getDocument = (colName, docId) => doc(db, colName, docId);
+// Logic: Ở Canvas dùng đường dẫn Artifact để tránh lỗi Permission, ở Netlify dùng CSDL gốc.
+const getCol = (colName) => isCanvasEnv ? collection(db, 'artifacts', sysAppId, 'public', 'data', colName) : collection(db, colName);
+const getDocument = (colName, docId) => isCanvasEnv ? doc(db, 'artifacts', sysAppId, 'public', 'data', colName, docId) : doc(db, colName, docId);
 
 // =========================================================================
 // 🚀 2. HÀM HỖ TRỢ LÕI VÀ LOGIC CHẤM CÔNG
@@ -279,7 +281,7 @@ export default function App() {
   }), [activeStaff, currentShift, staffLocations, todayStr]);
 
   // =========================================================================
-  // 5. USEEFFECTS VÀ XÁC THỰC FIREBASE (ĐĂNG NHẬP ẨN DANH)
+  // 5. USEEFFECTS VÀ XÁC THỰC FIREBASE
   // =========================================================================
   useEffect(() => {
     const script = document.createElement('script');
@@ -294,11 +296,18 @@ export default function App() {
   useEffect(() => {
     const initAuth = async () => { 
         try { 
-            // Luôn đăng nhập ẩn danh trực tiếp vào Database của bạn
-            await signInAnonymously(auth); 
+            if (isCanvasEnv && typeof __initial_auth_token !== 'undefined') {
+                try {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } catch (tokenError) {
+                    await signInAnonymously(auth);
+                }
+            } else {
+                await signInAnonymously(auth); 
+            }
         } catch (error) { 
             console.error("Lỗi Auth Firebase:", error); 
-            setAuthError("Lỗi cấu hình Database. Hãy kiểm tra cài đặt Authentication trên Firebase.");
+            setAuthError("Lỗi cấu hình CSDL. Hãy bật 'Anonymous SignIn' trên Firebase Console.");
             setIsLoading(false); 
         } 
     };
@@ -379,7 +388,7 @@ export default function App() {
   };
 
   const handleDeleteAllDuplicates = async () => {
-    if (!isSuperAdmin || !user) return alert("Không đủ quyền hạn hoặc chưa kết nối được Cơ sở dữ liệu.");
+    if (!isSuperAdmin || !user) return alert("Không đủ quyền hạn hoặc chưa kết nối CSDL.");
     if (!window.confirm("BẠN CÓ CHẮC CHẮN MƯỐN DỌN DẸP?\nHệ thống sẽ gộp số lượng các thiết bị giống hệt nhau.")) return;
     const keptSamples = new Map(); const keptOrders = new Map();
     const deletePromises = []; const updatePromises = [];
@@ -487,7 +496,7 @@ export default function App() {
 
   const handleAddOrder = async () => {
     if (!newOrderData.client.trim() || !newOrderData.model.trim()) return;
-    if (!user) return alert("Hệ thống chưa kết nối Cơ sở dữ liệu. Vui lòng kiểm tra quyền truy cập Firebase.");
+    if (!user) return alert("Hệ thống chưa kết nối CSDL.");
     const ts = Date.now();
     const reqId = `${newOrderData.client.substring(0, 3).toUpperCase()}-KĐ-${ts.toString().slice(-4)}`;
     const deadline = newOrderData.deadline ? new Date(newOrderData.deadline).toLocaleDateString('vi-VN') : new Date().toLocaleDateString('vi-VN');
@@ -627,7 +636,7 @@ export default function App() {
   };
 
   const handleSaveBatchAttendance = async () => {
-      if (!user) return alert("Hệ thống đang tải hoặc không đủ quyền hạn. Vui lòng chờ...");
+      if (!user) return alert("Hệ thống đang tải hoặc không đủ quyền hạn.");
       try {
           const promises = activePersonnel.map(p => {
               const mark = attendanceBatchData[p.id];
@@ -649,7 +658,7 @@ export default function App() {
   };
 
   const handleSavePersonAttendance = async () => {
-      if (!user || !selectedAttendanceStaffId) return alert("Hệ thống đang tải hoặc không đủ quyền hạn. Vui lòng chờ...");
+      if (!user || !selectedAttendanceStaffId) return alert("Hệ thống đang tải hoặc không đủ quyền hạn.");
       try {
           const staff = activePersonnel.find(p => p.id === selectedAttendanceStaffId);
           const currentTimesheet = { ...(staff.timesheet || {}) };
@@ -908,6 +917,9 @@ export default function App() {
     <>
     <style dangerouslySetInnerHTML={{__html: `.custom-scrollbar::-webkit-scrollbar { width: 6px; } .custom-scrollbar::-webkit-scrollbar-track { background: #050b14; } .custom-scrollbar::-webkit-scrollbar-thumb { background: #164e63; border-radius: 4px; } .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #0891b2; } @media print { @page { size: landscape; margin: 10mm; } body, main, div { background: white !important; color: black !important; border-color: #ccc !important; box-shadow: none !important; text-shadow: none !important; } .print\\:hidden { display: none !important; } .print\\:block { display: block !important; } .print\\:text-black { color: black !important; } .print\\:border-black { border-color: black !important; } * { color: black !important; } }`}} />
 
+    {/* BẢNG CHẤM CÔNG THÁNG IN ẨN */}
+    <div className={`hidden ${isPrintingMonthly ? 'print:block' : ''} bg-white w-full text-black font-sans`} dangerouslySetInnerHTML={{ __html: renderMonthlyPrintContent() }}></div>
+
     {/* MODAL CẤU HÌNH IN PDF THÁNG */}
     {showPrintModal && (
         <div className="fixed inset-0 bg-[#050b14]/90 z-[9999] flex items-center justify-center p-4 print:hidden">
@@ -1125,10 +1137,7 @@ export default function App() {
        </div>
     )})()}
 
-    {/* BẢNG CHẤM CÔNG THÁNG IN ẨN */}
-    <div className={`hidden ${isPrintingMonthly ? 'print:block' : ''} bg-white w-full text-black font-sans`} dangerouslySetInnerHTML={{ __html: renderMonthlyPrintContent() }}></div>
-
-    <div className={`flex h-screen w-full bg-[#050b14] font-sans overflow-hidden text-slate-300 selection:bg-cyan-900 selection:text-cyan-100 bg-[linear-gradient(rgba(6,182,212,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(6,182,212,0.03)_1px,transparent_1px)] ${isPrintingMonthly ? 'hidden' : ''}`}>
+    <div className={`flex h-screen w-full bg-[#050b14] font-sans overflow-hidden text-slate-300 selection:bg-cyan-900 selection:text-cyan-100 bg-[linear-gradient(rgba(6,182,212,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(6,182,212,0.03)_1px,transparent_1px)] ${isPrintingMonthly || showAttendanceCalendar || showPrintModal ? 'hidden' : ''}`}>
       
       {/* 💻 SIDEBAR KỸ THUẬT */}
       <aside className="hidden md:flex flex-col w-60 bg-[#0b1221]/90 backdrop-blur-md z-20 border-r border-cyan-900/50 transition-all duration-300 shadow-[5px_0_25px_rgba(0,0,0,0.5)]">
@@ -1203,7 +1212,7 @@ export default function App() {
           </div>
         </header>
 
-        {/* NỘI DUNG CHÍNH (W-FULL) */}
+        {/* NỘI DUNG CHÍNH (W-FULL BỎ MAX-W) */}
         <main className="flex-1 p-3 md:p-6 overflow-y-auto pb-24 md:pb-8 scroll-smooth w-full">
           
           {/* TAB 1: DASHBOARD */}
@@ -1877,8 +1886,14 @@ export default function App() {
                              
                              {isEditing ? (
                                <div className="flex-1 space-y-1 font-mono text-[10px]">
-                                 <input type="text" value={editPersonnelData.name} onChange={(e)=>setEditPersonnelData({...editPersonnelData, name: e.target.value})} className="w-full bg-[#050b14] border border-cyan-800 text-cyan-300 p-1 rounded" />
-                                 <input type="text" value={editPersonnelData.role} onChange={(e)=>setEditPersonnelData({...editPersonnelData, role: e.target.value})} className="w-full bg-[#050b14] border border-cyan-800 text-cyan-300 p-1 rounded" />
+                                 <input type="text" value={editPersonnelData.name} onChange={(e)=>setEditPersonnelData({...editPersonnelData, name: e.target.value})} className="w-full bg-[#050b14] border border-cyan-800 text-cyan-300 p-1 rounded outline-none" placeholder="Họ và tên..." />
+                                 <input type="text" value={editPersonnelData.role} onChange={(e)=>setEditPersonnelData({...editPersonnelData, role: e.target.value})} className="w-full bg-[#050b14] border border-cyan-800 text-cyan-300 p-1 rounded outline-none" placeholder="Chức vụ..." />
+                                 <select value={editPersonnelData.shift} onChange={(e)=>setEditPersonnelData({...editPersonnelData, shift: e.target.value})} className="w-full bg-[#050b14] border border-cyan-800 text-cyan-300 p-1 rounded outline-none">
+                                    <option value="Hành Chính">Hành Chính</option>
+                                    <option value="Ca Ngày">Ca Ngày</option>
+                                    <option value="Ca Đêm">Ca Đêm</option>
+                                    <option value="Part-time">Part-time</option>
+                                 </select>
                                </div>
                              ) : (
                                <div className="flex-1">
