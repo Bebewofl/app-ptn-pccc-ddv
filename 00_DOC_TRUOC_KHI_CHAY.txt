@@ -1,0 +1,40 @@
+HUB-PTN V2.2 — XỬ LÝ LIÊN PHÒNG
+
+Gói này là bộ dựng V2.2 từ đúng ZIP V2.1.1 đang chạy production của PTN-HFI.
+Không thay thế repository Điều hành PTN và không sửa branch main.
+
+CÁCH DÙNG
+1. Tải ZIP của branch hub-v22-builder và giải nén.
+2. Đặt file HUB_PTN_V2_1_1_PRODUCTION_RULES_AND_ONBOARDING*.zip cạnh thư mục/bộ dựng này (script cũng tự tìm ở thư mục cha và Downloads).
+3. Chạy: 01_BUILD_AND_PREVIEW_HUB_V2_2.cmd
+4. Script sẽ:
+   - sao chép nguyên nền V2.1.1;
+   - chèn module V2.2;
+   - tạo HUB_PTN_V2_2_INTERDEPT_PREVIEW.zip trên máy;
+   - kiểm tra cú pháp JS bằng Node nếu có;
+   - deploy Firebase Hosting PREVIEW channel hub-v22-interdept;
+   - KHÔNG sửa production;
+   - KHÔNG deploy Firestore Rules.
+
+V2.2 BAO GỒM
+- VM không biến mất khi chuyển phòng; nguồn vẫn theo dõi được.
+- Trạng thái rõ: Chờ R&D xử lý / R&D đang xử lý / Chờ Lấy mẫu-Kho / Chờ BGD quyết định...
+- PTN ↔ R&D và các không gian liên phòng hiển thị case thật từ HUB.
+- Phản hồi bộ phận xử lý: trạng thái, mô tả, kết quả kỹ thuật, đề xuất, người phản hồi, thời gian.
+- Đính kèm ảnh/file nhỏ trực tiếp; file lớn dùng link Drive/OneDrive.
+- PTN xác nhận hoàn thành hoặc yêu cầu bổ sung.
+- Audit event cho phản hồi/xác nhận.
+- Nút cấu hình Nguyễn Ngọc Sơn thành Trưởng phòng R&D với permission rnd.tech.overview.
+- Private handling không được mở rộng chỉ vì R&D có quyền xem tổng quan công khai.
+
+QUYỀN TRƯỞNG PHÒNG R&D
+Sau khi Hosting Preview đạt bằng tài khoản Trưởng phòng PTN:
+A. Trong trang PTN ↔ R&D bấm “Cấu hình Trưởng phòng R&D” để cấp permission cho ngocson707@gmail.com.
+B. Chỉ khi giao diện/VM hiện đúng mới chạy file được tạo trong gói V2.2:
+   02_DEPLOY_RULES_V2_2_FOR_RND_HEAD_TEST.cmd
+Rules V2.2 chỉ mở quyền ĐỌC CASE CÔNG KHAI cho account có permission rnd.tech.overview. Quyền private handling vẫn theo Rules V2.1.
+Nếu có lỗi quyền, chạy:
+   03_ROLLBACK_RULES_V2_1.cmd
+
+KHÔNG CHẠY PRODUCTION V2.2 ở bước này.
+Chỉ Preview -> test Trưởng phòng PTN -> Rules V2.2 test -> test Nguyễn Ngọc Sơn -> sau đó mới tạo Production.
