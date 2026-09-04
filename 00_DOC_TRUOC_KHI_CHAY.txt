@@ -1,52 +1,54 @@
-HUB-PTN V2.2.2 — PHỐI HỢP LIÊN PHÒNG + CHAT CỐ ĐỊNH THEO THREAD VM
+HUB-PTN V2.2.3 — SỬA PHẢN HỒI R&D + AUDIT KHÔNG CẦN COMPOSITE INDEX
 
-Bộ dựng này dùng đúng ZIP HUB V2.1.1 đang chạy production làm nền.
-Không sửa branch main. Không tự sửa Production. Không tự deploy Firestore Rules trong bước Preview.
+Bộ dựng dùng đúng ZIP HUB V2.1.1 đang chạy production làm nền.
+Không sửa branch main. Không tự đổi Production. Không tự deploy Firestore Rules trong bước build/Preview.
+
+LỖI ĐÃ SỬA TỪ ẢNH TEST
+1. R&D bấm “Gửi phản hồi có truy vết” báo:
+   Missing or insufficient permissions.
+2. Audit trail báo:
+   The query requires an index / create_composite...
+
+V2.2.3 XỬ LÝ
+- Phản hồi R&D ghi thêm bộ field định danh tương thích cả schema cũ và mới:
+  userUid/userEmail + createdByUid/createdByEmail.
+- Rules candidate V2.2.3 có quyền ghi rõ cho:
+  + department_response của Trưởng phòng R&D có permission rnd.response.manage;
+  + interdept_chat theo vai trò được phép;
+  + case_attachment theo phạm vi vận hành.
+- Private handling KHÔNG được mở rộng.
+- Audit trail không còn phụ thuộc query where(caseId)+orderBy(createdAt).
+  V2.2.3 query chỉ theo caseId rồi sort trên trình duyệt, vì vậy không cần tạo composite index chỉ để xem lịch sử VM.
+- Giữ nguyên chat cố định + thread VM của V2.2.2.
+- Giữ nguyên file/ảnh/video/link trong báo cáo và phản hồi.
 
 CÁCH CHẠY
-1. Tải ZIP branch hub-v22-builder và giải nén.
-2. Giữ file HUB_PTN_V2_1_1_PRODUCTION_RULES_AND_ONBOARDING*.zip trong Downloads hoặc đặt cạnh bộ dựng.
+1. Tải ZIP branch hub-v22-builder và giải nén mới.
+2. Giữ HUB_PTN_V2_1_1_PRODUCTION_RULES_AND_ONBOARDING*.zip trong Downloads hoặc cạnh bộ dựng.
 3. Chạy duy nhất:
-   01_BUILD_AND_PREVIEW_HUB_V2_2_2.cmd
-4. Script tự:
-   - sao chép nguyên nền V2.1.1;
-   - chèn module phối hợp V2.2.1 đã test;
-   - chèn lớp V2.2.2 chat cố định + thread theo VM;
-   - kiểm tra cú pháp JavaScript bằng Node;
-   - tạo HUB_PTN_V2_2_2_INTERDEPT_PREVIEW.zip;
-   - deploy Hosting Preview channel hub-v222-interdept;
-   - KHÔNG đổi Production;
-   - KHÔNG deploy Rules.
+   01_BUILD_AND_PREVIEW_HUB_V2_2_3.cmd
+4. Script tạo:
+   HUB_PTN_V2_2_3_RND_FIX_PREVIEW.zip
+   và deploy Preview channel:
+   hub-v223-interdept
 
-CHAT V2.2.2
-- Chỉ có 1 panel cố định tại trang PTN ↔ R&D.
-- Không còn box chat riêng trong từng drawer VM.
-- Panel có:
-  + Trao đổi chung PTN ↔ R&D;
-  + từng thread VM liên quan PTN ↔ R&D.
-- Bấm mở VM thì chat tự chuyển đúng thread VM đó.
-- Chat VM dùng bản ghi hub_comments/interdept_chat hiện có để bảo toàn lịch sử.
-- Trao đổi chung dùng collection hub_interdept_chat.
-- Tin nhắn quan trọng trong thread VM có nút “Gắn vào phản hồi”; nút chỉ chép nội dung vào ô Mô tả phản hồi để người xử lý rà soát và bấm gửi chính thức, KHÔNG tự tạo kết luận.
-- Kết luận kỹ thuật, trạng thái, file chính thức vẫn phải nằm ở Phản hồi của bộ phận xử lý / VM để audit.
+TEST TRƯỚC RULES
+- Mở Preview bằng tài khoản Nguyễn Ngọc Sơn.
+- Mở VM-011.
+- Audit không được còn link “The query requires an index”.
+- Thử gửi phản hồi R&D.
 
-RULES V2.2.2
-Sau khi Owner test Hosting Preview đạt mới chạy file nằm trong ZIP đầu ra:
-   02_DEPLOY_RULES_V2_2_2_FOR_RND_HEAD_TEST.cmd
-Rules candidate:
-- mở public hub_cases cho permission rnd.tech.overview;
-- mở Trao đổi chung PTN ↔ R&D cho vai trò quản lý/kỹ thuật được xác định;
-- không mở private handling;
-- chat chung chỉ thêm mới, không sửa/xóa.
-Nếu có lỗi quyền:
+NẾU PHẢN HỒI VẪN BÁO PERMISSION DENIED
+Trong ZIP đầu ra chạy:
+   02_DEPLOY_RULES_V2_2_3_RND_RESPONSE_TEST.cmd
+Sau đó test lại ngay:
+- phản hồi R&D;
+- ảnh/file đính kèm;
+- chat VM-011;
+- Trao đổi chung PTN ↔ R&D;
+- Owner đọc phản hồi và xác nhận/yêu cầu bổ sung.
+
+Nếu Rules V2.2.3 gây lỗi quyền ngoài dự kiến:
    03_ROLLBACK_RULES_V2_1.cmd
 
-TEST OWNER TRƯỚC RULES
-- PTN ↔ R&D có panel chat cố định bên phải.
-- Dropdown có Trao đổi chung + VM-011 (nếu VM-011 còn thuộc luồng PTN-R&D).
-- Mở VM-011: panel tự chọn VM-011; drawer không có box chat thứ hai.
-- Gửi chat VM-011 và chuyển sang VM khác: nội dung không lẫn nhau.
-- Trao đổi chung gửi được bằng Owner.
-- File/ảnh/video/thư mục của form báo cáo và file/link trong phản hồi V2.2.1 vẫn hoạt động.
-
-CHƯA CÔNG BỐ PRODUCTION V2.2.2 ở bước này.
+CHƯA CÔNG BỐ PRODUCTION V2.2.3 Ở BƯỚC NÀY.
