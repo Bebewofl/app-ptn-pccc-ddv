@@ -1,54 +1,57 @@
-HUB-PTN V2.2.3 — SỬA PHẢN HỒI R&D + AUDIT KHÔNG CẦN COMPOSITE INDEX
+HUB-PTN V2.2.4 — SỬA CHAT HAI CHIỀU PTN ↔ R&D
 
 Bộ dựng dùng đúng ZIP HUB V2.1.1 đang chạy production làm nền.
 Không sửa branch main. Không tự đổi Production. Không tự deploy Firestore Rules trong bước build/Preview.
 
-LỖI ĐÃ SỬA TỪ ẢNH TEST
-1. R&D bấm “Gửi phản hồi có truy vết” báo:
-   Missing or insufficient permissions.
-2. Audit trail báo:
-   The query requires an index / create_composite...
+GIỮ NGUYÊN NHỮNG GÌ ĐÃ OK Ở V2.2.3
+- Phản hồi R&D có truy vết.
+- Ảnh/file/link trong phản hồi.
+- Audit trail không cần composite index.
+- VM không biến mất khi chuyển phòng.
+- Private handling không mở rộng cho R&D.
 
-V2.2.3 XỬ LÝ
-- Phản hồi R&D ghi thêm bộ field định danh tương thích cả schema cũ và mới:
-  userUid/userEmail + createdByUid/createdByEmail.
-- Rules candidate V2.2.3 có quyền ghi rõ cho:
-  + department_response của Trưởng phòng R&D có permission rnd.response.manage;
-  + interdept_chat theo vai trò được phép;
-  + case_attachment theo phạm vi vận hành.
-- Private handling KHÔNG được mở rộng.
-- Audit trail không còn phụ thuộc query where(caseId)+orderBy(createdAt).
-  V2.2.3 query chỉ theo caseId rồi sort trên trình duyệt, vì vậy không cần tạo composite index chỉ để xem lịch sử VM.
-- Giữ nguyên chat cố định + thread VM của V2.2.2.
-- Giữ nguyên file/ảnh/video/link trong báo cáo và phản hồi.
+LỖI V2.2.4 SỬA
+Phía PTN đã gửi chat nhưng phía R&D không nhận được ổn định.
+Nguyên nhân thiết kế: các phiên bản trước chia chat VM và chat chung ở hai nguồn dữ liệu khác nhau, listener/thread dễ lệch nhau giữa hai tài khoản.
+
+V2.2.4 THAY ĐỔI
+- Tất cả tin chat MỚI (Trao đổi chung và từng VM) dùng một collection duy nhất:
+  hub_interdept_chat
+- Phân luồng bằng:
+  spaceKey = PTN-RD
+  threadKey = GENERAL hoặc mã VM, ví dụ VM-011
+- Cả PTN và R&D cùng nghe realtime một query spaceKey duy nhất rồi lọc thread trên client.
+- Không cần composite index.
+- PTN gửi -> R&D nhận realtime.
+- R&D gửi -> PTN nhận realtime.
+- Tin VM-011 không lẫn Trao đổi chung hoặc VM khác.
+- Tin chat VM cũ trong hub_comments vẫn được đọc bổ sung nếu quyền hiện tại cho phép, để không mất lịch sử.
+- Chat append-only; không sửa/xóa.
 
 CÁCH CHẠY
 1. Tải ZIP branch hub-v22-builder và giải nén mới.
 2. Giữ HUB_PTN_V2_1_1_PRODUCTION_RULES_AND_ONBOARDING*.zip trong Downloads hoặc cạnh bộ dựng.
 3. Chạy duy nhất:
-   01_BUILD_AND_PREVIEW_HUB_V2_2_3.cmd
+   01_BUILD_AND_PREVIEW_HUB_V2_2_4.cmd
 4. Script tạo:
-   HUB_PTN_V2_2_3_RND_FIX_PREVIEW.zip
+   HUB_PTN_V2_2_4_CHAT_SYNC_PREVIEW.zip
    và deploy Preview channel:
-   hub-v223-interdept
+   hub-v224-interdept
 
-TEST TRƯỚC RULES
-- Mở Preview bằng tài khoản Nguyễn Ngọc Sơn.
-- Mở VM-011.
-- Audit không được còn link “The query requires an index”.
-- Thử gửi phản hồi R&D.
+SAU KHI PREVIEW MỞ BÌNH THƯỜNG
+Giải nén HUB_PTN_V2_2_4_CHAT_SYNC_PREVIEW.zip rồi chạy:
+   02_DEPLOY_RULES_V2_2_4_CHAT_SYNC_TEST.cmd
 
-NẾU PHẢN HỒI VẪN BÁO PERMISSION DENIED
-Trong ZIP đầu ra chạy:
-   02_DEPLOY_RULES_V2_2_3_RND_RESPONSE_TEST.cmd
-Sau đó test lại ngay:
-- phản hồi R&D;
-- ảnh/file đính kèm;
-- chat VM-011;
-- Trao đổi chung PTN ↔ R&D;
-- Owner đọc phản hồi và xác nhận/yêu cầu bổ sung.
+TEST HAI MÁY / HAI TÀI KHOẢN CÙNG LÚC
+1. Trưởng phòng PTN và Nguyễn Ngọc Sơn cùng mở PTN ↔ R&D.
+2. Cả hai chọn VM-011.
+3. PTN gửi “PTN test chat 224” -> R&D phải thấy ngay, không F5.
+4. R&D gửi “R&D đã nhận chat 224” -> PTN phải thấy ngay, không F5.
+5. Chuyển Trao đổi chung -> test hai chiều.
+6. Quay VM-011 -> tin General không được lẫn vào thread VM.
+7. Phản hồi R&D V2.2.3 vẫn phải hoạt động bình thường.
 
-Nếu Rules V2.2.3 gây lỗi quyền ngoài dự kiến:
+Nếu Rules V2.2.4 gây lỗi quyền ngoài dự kiến:
    03_ROLLBACK_RULES_V2_1.cmd
 
-CHƯA CÔNG BỐ PRODUCTION V2.2.3 Ở BƯỚC NÀY.
+CHƯA CÔNG BỐ PRODUCTION V2.2.4 Ở BƯỚC NÀY.
