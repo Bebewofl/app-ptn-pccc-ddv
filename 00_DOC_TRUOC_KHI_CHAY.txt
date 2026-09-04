@@ -1,40 +1,52 @@
-HUB-PTN V2.2 — XỬ LÝ LIÊN PHÒNG
+HUB-PTN V2.2.2 — PHỐI HỢP LIÊN PHÒNG + CHAT CỐ ĐỊNH THEO THREAD VM
 
-Gói này là bộ dựng V2.2 từ đúng ZIP V2.1.1 đang chạy production của PTN-HFI.
-Không thay thế repository Điều hành PTN và không sửa branch main.
+Bộ dựng này dùng đúng ZIP HUB V2.1.1 đang chạy production làm nền.
+Không sửa branch main. Không tự sửa Production. Không tự deploy Firestore Rules trong bước Preview.
 
-CÁCH DÙNG
-1. Tải ZIP của branch hub-v22-builder và giải nén.
-2. Đặt file HUB_PTN_V2_1_1_PRODUCTION_RULES_AND_ONBOARDING*.zip cạnh thư mục/bộ dựng này (script cũng tự tìm ở thư mục cha và Downloads).
-3. Chạy: 01_BUILD_AND_PREVIEW_HUB_V2_2.cmd
-4. Script sẽ:
+CÁCH CHẠY
+1. Tải ZIP branch hub-v22-builder và giải nén.
+2. Giữ file HUB_PTN_V2_1_1_PRODUCTION_RULES_AND_ONBOARDING*.zip trong Downloads hoặc đặt cạnh bộ dựng.
+3. Chạy duy nhất:
+   01_BUILD_AND_PREVIEW_HUB_V2_2_2.cmd
+4. Script tự:
    - sao chép nguyên nền V2.1.1;
-   - chèn module V2.2;
-   - tạo HUB_PTN_V2_2_INTERDEPT_PREVIEW.zip trên máy;
-   - kiểm tra cú pháp JS bằng Node nếu có;
-   - deploy Firebase Hosting PREVIEW channel hub-v22-interdept;
-   - KHÔNG sửa production;
-   - KHÔNG deploy Firestore Rules.
+   - chèn module phối hợp V2.2.1 đã test;
+   - chèn lớp V2.2.2 chat cố định + thread theo VM;
+   - kiểm tra cú pháp JavaScript bằng Node;
+   - tạo HUB_PTN_V2_2_2_INTERDEPT_PREVIEW.zip;
+   - deploy Hosting Preview channel hub-v222-interdept;
+   - KHÔNG đổi Production;
+   - KHÔNG deploy Rules.
 
-V2.2 BAO GỒM
-- VM không biến mất khi chuyển phòng; nguồn vẫn theo dõi được.
-- Trạng thái rõ: Chờ R&D xử lý / R&D đang xử lý / Chờ Lấy mẫu-Kho / Chờ BGD quyết định...
-- PTN ↔ R&D và các không gian liên phòng hiển thị case thật từ HUB.
-- Phản hồi bộ phận xử lý: trạng thái, mô tả, kết quả kỹ thuật, đề xuất, người phản hồi, thời gian.
-- Đính kèm ảnh/file nhỏ trực tiếp; file lớn dùng link Drive/OneDrive.
-- PTN xác nhận hoàn thành hoặc yêu cầu bổ sung.
-- Audit event cho phản hồi/xác nhận.
-- Nút cấu hình Nguyễn Ngọc Sơn thành Trưởng phòng R&D với permission rnd.tech.overview.
-- Private handling không được mở rộng chỉ vì R&D có quyền xem tổng quan công khai.
+CHAT V2.2.2
+- Chỉ có 1 panel cố định tại trang PTN ↔ R&D.
+- Không còn box chat riêng trong từng drawer VM.
+- Panel có:
+  + Trao đổi chung PTN ↔ R&D;
+  + từng thread VM liên quan PTN ↔ R&D.
+- Bấm mở VM thì chat tự chuyển đúng thread VM đó.
+- Chat VM dùng bản ghi hub_comments/interdept_chat hiện có để bảo toàn lịch sử.
+- Trao đổi chung dùng collection hub_interdept_chat.
+- Tin nhắn quan trọng trong thread VM có nút “Gắn vào phản hồi”; nút chỉ chép nội dung vào ô Mô tả phản hồi để người xử lý rà soát và bấm gửi chính thức, KHÔNG tự tạo kết luận.
+- Kết luận kỹ thuật, trạng thái, file chính thức vẫn phải nằm ở Phản hồi của bộ phận xử lý / VM để audit.
 
-QUYỀN TRƯỞNG PHÒNG R&D
-Sau khi Hosting Preview đạt bằng tài khoản Trưởng phòng PTN:
-A. Trong trang PTN ↔ R&D bấm “Cấu hình Trưởng phòng R&D” để cấp permission cho ngocson707@gmail.com.
-B. Chỉ khi giao diện/VM hiện đúng mới chạy file được tạo trong gói V2.2:
-   02_DEPLOY_RULES_V2_2_FOR_RND_HEAD_TEST.cmd
-Rules V2.2 chỉ mở quyền ĐỌC CASE CÔNG KHAI cho account có permission rnd.tech.overview. Quyền private handling vẫn theo Rules V2.1.
-Nếu có lỗi quyền, chạy:
+RULES V2.2.2
+Sau khi Owner test Hosting Preview đạt mới chạy file nằm trong ZIP đầu ra:
+   02_DEPLOY_RULES_V2_2_2_FOR_RND_HEAD_TEST.cmd
+Rules candidate:
+- mở public hub_cases cho permission rnd.tech.overview;
+- mở Trao đổi chung PTN ↔ R&D cho vai trò quản lý/kỹ thuật được xác định;
+- không mở private handling;
+- chat chung chỉ thêm mới, không sửa/xóa.
+Nếu có lỗi quyền:
    03_ROLLBACK_RULES_V2_1.cmd
 
-KHÔNG CHẠY PRODUCTION V2.2 ở bước này.
-Chỉ Preview -> test Trưởng phòng PTN -> Rules V2.2 test -> test Nguyễn Ngọc Sơn -> sau đó mới tạo Production.
+TEST OWNER TRƯỚC RULES
+- PTN ↔ R&D có panel chat cố định bên phải.
+- Dropdown có Trao đổi chung + VM-011 (nếu VM-011 còn thuộc luồng PTN-R&D).
+- Mở VM-011: panel tự chọn VM-011; drawer không có box chat thứ hai.
+- Gửi chat VM-011 và chuyển sang VM khác: nội dung không lẫn nhau.
+- Trao đổi chung gửi được bằng Owner.
+- File/ảnh/video/thư mục của form báo cáo và file/link trong phản hồi V2.2.1 vẫn hoạt động.
+
+CHƯA CÔNG BỐ PRODUCTION V2.2.2 ở bước này.
