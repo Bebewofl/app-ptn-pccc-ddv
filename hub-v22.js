@@ -1,34 +1,36 @@
-/* HUB-PTN V2.2 — Xử lý liên phòng. Loaded after stable V2.1.1 source. */
+/* HUB-PTN V2.2.1 — phối hợp liên phòng thực tế. Loaded after stable V2.1.1. */
 (function(){
-  const V22_VERSION='2.2';
-  const V22_RND_HEAD_EMAIL='ngocson707@gmail.com';
-  const V22_RESPONSE_CACHE=new Map();
-  const V22_WARMING=new Set();
+  const V22_VERSION='2.2.1';
+  const RND_HEAD_EMAIL='ngocson707@gmail.com';
+  const CACHE=new Map();
+  const WARM=new Set();
 
-  function v22Esc(v){
+  function esc(v){
     const s=String(v??'');
-    try{ if(typeof escapeHtml==='function') return escapeHtml(s); }catch(e){}
+    try{if(typeof escapeHtml==='function')return escapeHtml(s)}catch(e){}
     return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
-  function v22Attr(v){return v22Esc(v).replace(/`/g,'&#96;')}
-  function v22Email(){
-    try{return String(currentUser?.email||'').trim().toLowerCase()}catch(e){return ''}
-  }
-  function v22RoleType(){try{return R()?.type||''}catch(e){return ''}}
-  function v22IsHead(){return ['head'].includes(v22RoleType())}
-  function v22HasPermission(p){
-    try{if(typeof hasPermission==='function' && hasPermission(p))return true}catch(e){}
+  function attr(v){return esc(v).replace(/`/g,'&#96;')}
+  function email(){try{return String(currentUser?.email||'').trim().toLowerCase()}catch(e){return ''}}
+  function role(){try{return R()?.type||''}catch(e){return ''}}
+  function isHead(){return role()==='head'}
+  function hasPerm(p){
+    try{if(typeof hasPermission==='function'&&hasPermission(p))return true}catch(e){}
     try{return Array.isArray(currentAccess?.permissions)&&currentAccess.permissions.includes(p)}catch(e){return false}
   }
-  function v22IsRndHead(){return v22RoleType()==='rnd' && (v22Email()===V22_RND_HEAD_EMAIL || v22HasPermission('rnd.tech.overview'))}
-  function v22Cases(){try{return Array.isArray(hubCases)?hubCases:[]}catch(e){return []}}
-  function v22VisibleCases(){
+  function isRndHead(){return role()==='rnd'&&(email()===RND_HEAD_EMAIL||hasPerm('rnd.tech.overview'))}
+  function cases(){try{return Array.isArray(hubCases)?hubCases:[]}catch(e){return []}}
+  function visible(){
     try{if(typeof visibleCases==='function')return visibleCases()}catch(e){}
-    const all=v22Cases();
-    try{if(typeof groupCanSee==='function')return all.filter(groupCanSee)}catch(e){}
-    return all;
+    try{if(typeof groupCanSee==='function')return cases().filter(groupCanSee)}catch(e){}
+    return cases();
   }
-  function v22Unit(c){
+  function sourceUnit(c){
+    if(c?.sourceUnitCode)return String(c.sourceUnitCode);
+    if(c?.sourceSpace==='rnd'||c?.originUnitCode==='RD'||String(c?.sourceGroup||'')==='RND')return 'RD';
+    return 'PTN';
+  }
+  function currentUnit(c){
     if(c?.currentUnitCode)return String(c.currentUnitCode);
     const d=String(c?.currentDesk||'');
     if(d==='R&D')return 'RD';
@@ -39,325 +41,272 @@
     if(d==='Ban Giám đốc')return 'BGD';
     return 'PTN';
   }
-  function v22DeskLabel(c){
-    const u=v22Unit(c);
-    return ({RD:'R&D',HCNS:'HCNS',KT:'Kế toán',KHO:'Lấy mẫu–Kho',QLCL:'Bộ phận QLCL',BGD:'Ban Giám đốc',PTN:'PTN'})[u]||String(c?.currentDesk||'PTN');
-  }
-  function v22IsExternal(c){return v22Unit(c)!=='PTN'}
-  function v22LatestResponse(c){
-    const list=V22_RESPONSE_CACHE.get(String(c?.id||''))||[];
-    return list[0]||null;
-  }
-  function v22EffectiveStatus(c){
-    const latest=v22LatestResponse(c);
-    const desk=v22DeskLabel(c);
-    if(latest && v22IsExternal(c)){
-      const rs=String(latest.responseStatus||'');
-      if(rs==='Đang xử lý')return desk+' đang xử lý';
-      if(rs==='Cần PTN bổ sung thông tin')return desk+' cần PTN bổ sung';
-      if(rs==='Đã xử lý – chờ PTN xác nhận'||rs==='Đã xử lý - chờ PTN xác nhận')return desk+' đã phản hồi – chờ PTN xác nhận';
-      if(rs==='Đề nghị chuyển bộ phận khác')return desk+' đề nghị chuyển bộ phận';
-    }
-    const s=String(c?.status||'');
-    if(v22IsExternal(c)){
-      if(/đóng|đã xử lý/i.test(s))return s;
-      if(/chờ.*bổ sung/i.test(s))return 'Chờ '+desk+' bổ sung';
-      if(/đang xử lý/i.test(s))return desk+' đang xử lý';
-      if(v22Unit(c)==='BGD')return 'Chờ Ban Giám đốc quyết định';
-      if(/mới|đã tiếp nhận|chờ|phản hồi/i.test(s)||!s)return 'Chờ '+desk+' xử lý';
-    }
-    return s||'Mới';
-  }
-  function v22StatusClass(s){
-    const x=String(s||'').toLowerCase();
-    if(x.includes('đã xử lý')||x.includes('đóng')||x.includes('hoàn thành'))return 'done';
-    if(x.includes('đang xử lý'))return 'work';
-    if(x.includes('cần ptn')||x.includes('đề nghị'))return 'alert';
-    if(x.includes('chờ'))return 'wait';
-    return '';
-  }
-  function v22StatusHtml(c){const s=v22EffectiveStatus(c);return `<span class="v22-badge ${v22StatusClass(s)}">${v22Esc(s)}</span>`}
-  function v22CaseCard(c){
-    const id=v22Esc(c.id), desk=v22DeskLabel(c);
-    return `<div class="v22-case" onclick="openCaseDetail('${v22Attr(c.id)}')">
-      <div class="v22-case-code">${id}</div>
-      <div class="v22-case-title">${v22Esc(c.title)}</div>
-      <div class="v22-case-meta"><span>${v22Esc(c.sourceGroup||'')}</span><span>•</span><span>Nơi xử lý: <b>${v22Esc(desk)}</b></span><span>•</span><span>Hạn: ${v22Esc(c.deadline||'Chưa đặt')}</span></div>
-      <div class="v22-state-line" data-v22-status="${v22Attr(c.id)}">${v22StatusHtml(c)}</div>
-    </div>`;
-  }
-  function v22RefreshStatusDom(id){
-    const c=v22Cases().find(x=>String(x.id)===String(id)); if(!c)return;
-    document.querySelectorAll(`[data-v22-status="${CSS.escape(String(id))}"]`).forEach(el=>el.innerHTML=v22StatusHtml(c));
-  }
+  function unitLabel(u){return ({RD:'R&D',PTN:'PTN',HCNS:'HCNS',KT:'Kế toán',KHO:'Lấy mẫu–Kho',QLCL:'Bộ phận QLCL',BGD:'Ban Giám đốc'})[u]||u}
+  function currentLabel(c){return unitLabel(currentUnit(c))}
+  function completed(c){return /đã xử lý|đóng|hoàn thành/i.test(String(c?.status||''))}
+  function comments(caseId){return CACHE.get(String(caseId||''))||[]}
+  function responses(c){return comments(c?.id).filter(x=>x.type==='department_response')}
+  function chats(c){return comments(c?.id).filter(x=>x.type==='interdept_chat')}
+  function attachmentRecords(c){return comments(c?.id).filter(x=>x.type==='case_attachment')}
+  function latestResponse(c){return responses(c)[0]||null}
 
-  async function v22LoadResponses(caseId){
+  async function loadComments(caseId){
     const id=String(caseId||''); if(!id)return [];
     try{
       const snap=await db.collection('hub_comments').where('caseId','==',id).get();
-      const rows=snap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.type==='department_response');
+      const rows=snap.docs.map(d=>({id:d.id,...d.data()}));
       rows.sort((a,b)=>{
         const ta=a.createdAt?.toMillis?a.createdAt.toMillis():Date.parse(a.createdAt||0)||0;
         const tb=b.createdAt?.toMillis?b.createdAt.toMillis():Date.parse(b.createdAt||0)||0;
         return tb-ta;
       });
-      V22_RESPONSE_CACHE.set(id,rows);
-      v22RefreshStatusDom(id);
+      CACHE.set(id,rows);
+      refreshStatus(id);
       return rows;
     }catch(e){
-      console.warn('V2.2 response read skipped',id,e?.code||e?.message||e);
-      return V22_RESPONSE_CACHE.get(id)||[];
+      console.warn('V2.2.1 comments read skipped',id,e?.code||e?.message||e);
+      return CACHE.get(id)||[];
     }
   }
-  function v22WarmResponses(list){
+  function warm(list){
     (list||[]).forEach(c=>{
-      const id=String(c.id||''); if(!id||V22_WARMING.has(id)||V22_RESPONSE_CACHE.has(id))return;
-      V22_WARMING.add(id);
-      setTimeout(()=>v22LoadResponses(id).finally(()=>V22_WARMING.delete(id)),0);
+      const id=String(c.id||'');if(!id||CACHE.has(id)||WARM.has(id))return;
+      WARM.add(id);setTimeout(()=>loadComments(id).finally(()=>WARM.delete(id)),0);
     });
   }
 
-  // Keep source-group visibility; R&D head gets public PTN overview after Rules V2.2 is enabled.
-  try{
-    if(typeof groupCanSee==='function'){
-      const oldGroupCanSee=groupCanSee;
-      groupCanSee=function(c){if(v22IsRndHead())return true;return oldGroupCanSee(c)};
+  function effectiveStatus(c){
+    if(completed(c))return String(c.status||'Đã xử lý');
+    const cur=currentUnit(c),src=sourceUnit(c),desk=unitLabel(cur),r=latestResponse(c),base=String(c?.status||'');
+    if(r){
+      const s=String(r.responseStatus||'');
+      if(s==='Đang xử lý')return desk+' đang xử lý';
+      if(s==='Cần PTN bổ sung thông tin')return 'Chờ PTN bổ sung thông tin';
+      if(s==='Đã xử lý – chờ PTN xác nhận'||s==='Đã xử lý - chờ PTN xác nhận')return 'Chờ PTN xác nhận';
+      if(s==='Đề nghị chuyển bộ phận khác')return 'Chờ Trưởng phòng điều phối lại';
     }
-  }catch(e){console.warn('V2.2 group visibility wrapper skipped',e)}
-
-  // R&D head query changes from currentDesk=R&D to public all-cases query. Rules V2.2 remains the server gate.
-  try{
-    if(typeof caseQueryForRole==='function'){
-      const oldCaseQuery=caseQueryForRole;
-      caseQueryForRole=function(){
-        if(v22IsRndHead())return db.collection('hub_cases');
-        return oldCaseQuery.apply(this,arguments);
-      };
+    if(cur==='RD'&&src==='PTN'){
+      if(base==='Đã tiếp nhận'||base==='Đang xử lý')return 'R&D đang xử lý';
+      return 'Chờ R&D tiếp nhận';
     }
-  }catch(e){console.warn('V2.2 case query wrapper skipped',e)}
+    if(cur==='PTN'&&src==='RD'){
+      if(base==='Đã tiếp nhận'||base==='Đang xử lý')return 'PTN đang xử lý';
+      return 'Chờ PTN tiếp nhận';
+    }
+    if(cur!=='PTN'){
+      if(base==='Đã tiếp nhận'||base==='Đang xử lý')return desk+' đang xử lý';
+      if(cur==='BGD')return 'Chờ Ban Giám đốc quyết định';
+      return 'Chờ '+desk+' tiếp nhận';
+    }
+    return base||'Mới';
+  }
+  function stage(c){
+    const s=effectiveStatus(c).toLowerCase();
+    if(completed(c))return 'done';
+    if(s.includes('chờ ptn xác nhận'))return 'confirm';
+    if(s.includes('đang xử lý')||s.includes('chờ ptn bổ sung')||s.includes('điều phối lại'))return 'work';
+    return 'wait';
+  }
+  function cls(s){const x=String(s||'').toLowerCase();if(/đã xử lý|đóng|hoàn thành/.test(x))return'done';if(x.includes('đang xử lý'))return'work';if(x.includes('bổ sung')||x.includes('điều phối'))return'alert';return'wait'}
+  function statusHtml(c){const s=effectiveStatus(c);return `<span class="v22-badge ${cls(s)}">${esc(s)}</span>`}
+  function refreshStatus(id){
+    const c=cases().find(x=>String(x.id)===String(id));if(!c)return;
+    document.querySelectorAll(`[data-v22-status="${CSS.escape(String(id))}"]`).forEach(el=>el.innerHTML=statusHtml(c));
+  }
 
-  // Board: transferred cases stay on source board and show where they are waiting.
+  function pairName(c){
+    const src=sourceUnit(c),cur=currentUnit(c);
+    if(src==='RD')return 'R&D → '+unitLabel(cur);
+    if(cur==='RD'||c?.lastExternalUnitCode==='RD'||c?.interdeptPair==='PTN-RD')return 'PTN → R&D';
+    return unitLabel(src)+' → '+unitLabel(cur);
+  }
+  function rndPairCases(){
+    return visible().filter(c=>currentUnit(c)==='RD'||sourceUnit(c)==='RD'||c?.lastExternalUnitCode==='RD'||c?.interdeptPair==='PTN-RD');
+  }
+  function genericPairCases(units){return visible().filter(c=>units.includes(currentUnit(c))||units.includes(sourceUnit(c))||units.includes(c?.lastExternalUnitCode))}
+  function card(c){
+    return `<div class="v22-case" onclick="openCaseDetail('${attr(c.id)}')"><div class="v22-case-code">${esc(c.id)}</div><div class="v22-case-title">${esc(c.title)}</div><div class="v22-case-meta"><span>${esc(pairName(c))}</span><span>•</span><span>Hiện tại: <b>${esc(currentLabel(c))}</b></span><span>•</span><span>Hạn: ${esc(c.deadline||'Chưa đặt')}</span></div><div class="v22-state-line" data-v22-status="${attr(c.id)}">${statusHtml(c)}</div></div>`;
+  }
+  function section(title,list,empty){return `<div class="v22-panel"><div class="v22-panel-head"><h3>${esc(title)}</h3><span class="v22-badge">${list.length}</span></div><div class="v22-panel-body"><div class="v22-case-list">${list.length?list.map(card).join(''):`<div class="v22-empty">${esc(empty)}</div>`}</div></div></div>`}
+
+  function pageInfo(page){
+    if(page==='rnd')return {title:'PTN ↔ R&D',sub:'Chỉ hiển thị các vấn đề/vướng mắc thực sự đang phối hợp giữa PTN và R&D, cùng lịch sử đã xử lý.',units:['RD']};
+    if(page==='office'||page==='hr')return {title:'PTN-Khối Văn phòng',sub:'Các case chuyển HCNS, Kế toán, Lấy mẫu–Kho và lịch sử phối hợp.',units:['HCNS','KT','KHO']};
+    if(page==='quality')return {title:'PTN-Bộ phận Quản lý chất lượng',sub:'Case/handoff chuyển QLCL và lịch sử xử lý.',units:['QLCL']};
+    if(page==='bod')return {title:'PTN ↔ Ban Giám đốc',sub:'Vấn đề cần quyết định/kết luận và lịch sử đã xử lý.',units:['BGD']};
+    return null;
+  }
+  function renderInterdept(page){
+    const info=pageInfo(page);if(!info)return'';
+    const list=page==='rnd'?rndPairCases():genericPairCases(info.units);warm(list);
+    const waits=list.filter(c=>stage(c)==='wait');
+    const works=list.filter(c=>stage(c)==='work');
+    const confirms=list.filter(c=>stage(c)==='confirm');
+    const dones=list.filter(c=>stage(c)==='done');
+    const setup=page==='rnd'&&isHead()?`<button class="btn" onclick="v22GrantRndHead()">Cấu hình Trưởng phòng R&D</button>`:'';
+    const guide=page==='rnd'?`<div class="v22-notice"><b>Chờ tiếp nhận:</b> VM đã được chuyển sang R&D nhưng R&D chưa xác nhận/bắt đầu xử lý. &nbsp; <b>Đang xử lý:</b> R&D đã tiếp nhận hoặc đã gửi phản hồi đang xử lý. Chat chỉ dùng hỏi đáp nhanh; kết luận kỹ thuật phải ghi ở “Phản hồi của bộ phận xử lý”.</div>`:'';
+    return `<div class="v22-page-head"><div><h1>${esc(info.title)}</h1><p>${esc(info.sub)}</p></div><div class="v22-tools">${setup}</div></div>${guide}
+      <div class="v22-metrics"><div class="v22-metric"><span>Chờ tiếp nhận</span><b>${waits.length}</b></div><div class="v22-metric"><span>Đang xử lý / phối hợp</span><b>${works.length}</b></div><div class="v22-metric"><span>Chờ xác nhận</span><b>${confirms.length}</b></div><div class="v22-metric"><span>Đã xử lý / Lịch sử</span><b>${dones.length}</b></div></div>
+      ${section('CHỜ TIẾP NHẬN',waits,'Không có case chờ tiếp nhận.')}
+      ${section('ĐANG XỬ LÝ / PHỐI HỢP',works,'Không có case đang xử lý.')}
+      ${section('CHỜ XÁC NHẬN',confirms,'Không có case chờ xác nhận.')}
+      ${section('ĐÃ XỬ LÝ / LỊCH SỬ',dones,'Chưa có case hoàn thành trong không gian này.')}`;
+  }
+
+  // Trưởng phòng R&D có thể xem public case PTN ở Không gian PTN, nhưng trang PTN↔R&D KHÔNG hiển thị tổng quan toàn PTN.
+  try{if(typeof groupCanSee==='function'){const old=groupCanSee;groupCanSee=function(c){if(isRndHead())return true;return old(c)}}}catch(e){}
+  try{if(typeof caseQueryForRole==='function'){const old=caseQueryForRole;caseQueryForRole=function(){if(isRndHead())return db.collection('hub_cases');return old.apply(this,arguments)}}}catch(e){}
+  try{if(typeof render==='function'){const old=render;render=function(page){if(['rnd','office','hr','quality','bod'].includes(page))return renderInterdept(page);return old(page)}}}catch(e){}
+
+  // Bảng PTN: làm rõ “đang xử lý” và “chờ phản hồi/xác nhận”.
   try{
     if(typeof renderCaseBoard==='function'){
       renderCaseBoard=function(){
-        const list=v22VisibleCases();
-        v22WarmResponses(list);
+        const list=visible();warm(list);
         const buckets=[
-          ['Mới / Tiếp nhận',x=>!v22IsExternal(x)&&['Mới','Đã tiếp nhận','Chờ Trưởng phòng'].includes(String(x.status||''))],
-          ['Đang xử lý',x=>v22EffectiveStatus(x).toLowerCase().includes('đang xử lý')],
-          ['Đang chờ',x=>v22EffectiveStatus(x).toLowerCase().includes('chờ')||v22IsExternal(x)&&!v22EffectiveStatus(x).toLowerCase().includes('đang xử lý')&&!/đã xử lý|đóng/i.test(v22EffectiveStatus(x))],
-          ['Đã xử lý / Đóng',x=>/đã xử lý|đóng|hoàn thành/i.test(v22EffectiveStatus(x))]
+          ['Mới / Tiếp nhận',x=>!completed(x)&&stage(x)==='wait'&&currentUnit(x)==='PTN'],
+          ['Đang xử lý',x=>stage(x)==='work'],
+          ['Chờ phản hồi / xác nhận',x=>!completed(x)&&(stage(x)==='wait'&&currentUnit(x)!=='PTN'||stage(x)==='confirm')],
+          ['Đã xử lý / Đóng',x=>stage(x)==='done']
         ];
-        return `<div class="caseboard">${buckets.map(([title,fn])=>{
-          const rows=list.filter(fn);
-          return `<div class="casecol"><h3>${v22Esc(title)}</h3>${rows.length?rows.map(c=>`<div class="casecard" onclick="openCaseDetail('${v22Attr(c.id)}')"><div class="casecode">${v22Esc(c.id)}</div><b>${v22Esc(c.title)}</b><div class="v22-board-location">${v22Esc(c.sourceGroup||'')} • <b>${v22Esc(v22DeskLabel(c))}</b> • ${v22Esc(c.deadline||'Chưa đặt')}</div><div class="case-actions" data-v22-status="${v22Attr(c.id)}">${v22StatusHtml(c)}</div></div>`).join(''):'<div class="v22-empty">Không có.</div>'}</div>`;
-        }).join('')}</div>`;
+        return `<div class="caseboard">${buckets.map(([title,fn])=>{const rows=list.filter(fn);return `<div class="casecol"><h3>${esc(title)}</h3>${rows.length?rows.map(c=>`<div class="casecard" onclick="openCaseDetail('${attr(c.id)}')"><div class="casecode">${esc(c.id)}</div><b>${esc(c.title)}</b><div class="v22-board-location">${esc(c.sourceGroup||'')} • ${esc(pairName(c))} • ${esc(c.deadline||'Chưa đặt')}</div><div class="case-actions" data-v22-status="${attr(c.id)}">${statusHtml(c)}</div></div>`).join(''):'<div class="v22-empty">Không có.</div>'}</div>`}).join('')}</div>`;
       };
     }
-  }catch(e){console.warn('V2.2 board override skipped',e)}
+  }catch(e){console.warn('V2.2.1 board override skipped',e)}
 
-  function v22PageInfo(page){
-    if(page==='rnd')return {title:'PTN ↔ R&D',sub:'Không gian kỹ thuật liên phòng: tiếp nhận, phản hồi và theo dõi VM có truy vết.',units:['RD']};
-    if(page==='office'||page==='hr')return {title:'PTN-Khối Văn phòng',sub:'Phối hợp HCNS, Kế toán, Lấy mẫu–Kho theo đúng đơn vị được phân quyền.',units:['HCNS','KT','KHO']};
-    if(page==='quality')return {title:'PTN-Bộ phận Quản lý chất lượng',sub:'Theo dõi case/handoff chuyển QLCL; không sửa dữ liệu thử nghiệm đã khóa.',units:['QLCL']};
-    if(page==='bod')return {title:'PTN ↔ Ban Giám đốc',sub:'Vấn đề cần giám sát, quyết định, kết luận và theo dõi trạng thái.',units:['BGD']};
-    return null;
-  }
-  function v22RelevantCases(units){return v22VisibleCases().filter(c=>units.includes(v22Unit(c)))}
-  function v22MetricCount(list,kind){
-    if(kind==='wait')return list.filter(c=>v22EffectiveStatus(c).toLowerCase().includes('chờ')).length;
-    if(kind==='work')return list.filter(c=>v22EffectiveStatus(c).toLowerCase().includes('đang xử lý')).length;
-    if(kind==='confirm')return list.filter(c=>v22EffectiveStatus(c).toLowerCase().includes('chờ ptn xác nhận')).length;
-    if(kind==='done')return list.filter(c=>/đã xử lý|đóng|hoàn thành/i.test(v22EffectiveStatus(c))).length;
-    return 0;
-  }
-  function v22RenderInterdept(page){
-    const info=v22PageInfo(page); if(!info)return '';
-    const list=v22RelevantCases(info.units);
-    v22WarmResponses(list);
-    const all=v22VisibleCases();
-    const ownerRndSetup=(page==='rnd'&&v22IsHead())?`<button class="btn" onclick="v22GrantRndHead()">Cấu hình Trưởng phòng R&D</button>`:'';
-    const publicOverview=(page==='rnd'&&(v22IsHead()||v22IsRndHead()))?`<div class="v22-panel"><div class="v22-panel-head"><h3>TỔNG QUAN VƯỚNG MẮC CÔNG KHAI PTN</h3><span class="v22-badge">${all.length} VM</span></div><div class="v22-panel-body v22-tech-overview"><div class="v22-case-list">${all.length?all.map(v22CaseCard).join(''):'<div class="v22-empty">Chưa có dữ liệu trong phạm vi quyền.</div>'}</div></div></div>`:'';
-    return `<div class="v22-page-head"><div><h1>${v22Esc(info.title)}</h1><p>${v22Esc(info.sub)}</p></div><div class="v22-tools">${ownerRndSetup}</div></div>
-      <div class="v22-notice"><b>V2.2:</b> VM vẫn tồn tại ở nhóm/phòng phát hiện sau khi chuyển xử lý. Không gian này chỉ bổ sung nơi xử lý, phản hồi và trạng thái; không thay thế hồ sơ thử nghiệm chính thức.</div>
-      <div class="v22-metrics"><div class="v22-metric"><span>Đang chờ bộ phận</span><b>${v22MetricCount(list,'wait')}</b></div><div class="v22-metric"><span>Đang xử lý</span><b>${v22MetricCount(list,'work')}</b></div><div class="v22-metric"><span>Chờ PTN xác nhận</span><b>${v22MetricCount(list,'confirm')}</b></div><div class="v22-metric"><span>Đã xử lý/Đóng</span><b>${v22MetricCount(list,'done')}</b></div></div>
-      <div class="v22-panel"><div class="v22-panel-head"><h3>VẤN ĐỀ / VƯỚNG MẮC ĐANG Ở ${v22Esc(info.title.replace('PTN ↔ ','').replace('PTN-',''))}</h3><span class="v22-badge">${list.length}</span></div><div class="v22-panel-body"><div class="v22-case-list">${list.length?list.map(v22CaseCard).join(''):'<div class="v22-empty">Chưa có VM đang ở bộ phận này.</div>'}</div></div></div>
-      ${publicOverview}`;
-  }
-
-  // Replace only interdepartment pages. Other HUB pages remain from V2.1.1.
-  try{
-    if(typeof render==='function'){
-      const oldRender=render;
-      render=function(page){
-        if(['rnd','office','hr','quality','bod'].includes(page))return v22RenderInterdept(page);
-        return oldRender(page);
-      };
-    }
-  }catch(e){console.warn('V2.2 render wrapper skipped',e)}
-
-  async function v22GrantRndHead(){
-    if(!v22IsHead()){alert('Chỉ Trưởng phòng PTN được cấu hình quyền này.');return}
-    if(!confirm('Cấp Nguyễn Ngọc Sơn (ngocson707@gmail.com) quyền Trưởng phòng R&D: xem tổng quan CASE CÔNG KHAI PTN và xử lý case R&D?\n\nPrivate handling các bộ phận khác vẫn không được mở.'))return;
+  async function grantRndHead(){
+    if(!isHead()){alert('Chỉ Trưởng phòng PTN được cấu hình quyền này.');return}
+    if(!confirm('Cấp Nguyễn Ngọc Sơn quyền Trưởng phòng R&D: xem tổng quan CASE CÔNG KHAI PTN và xử lý case R&D?\n\nPrivate handling các bộ phận khác vẫn không được mở.'))return;
     try{
-      const ref=db.collection('hub_access').doc(V22_RND_HEAD_EMAIL);
-      await ref.set({
-        email:V22_RND_HEAD_EMAIL,name:'Nguyễn Ngọc Sơn',role:'rnd',department:'R&D',personnelTitle:'Trưởng phòng R&D',unitCodes:['RD'],active:true,accessModelVersion:'2.2',
-        spaces:FV.arrayUnion('rnd','common','ptn'),
-        permissions:FV.arrayUnion('rnd.tech.overview','rnd.response.manage'),
-        updatedAt:FV.serverTimestamp(),updatedBy:v22Email()
-      },{merge:true});
-      try{await db.collection('hub_audit_logs').add({action:'GRANT_RND_HEAD_V22',targetEmail:V22_RND_HEAD_EMAIL,actorUid:currentUser.uid,actorEmail:v22Email(),createdAt:FV.serverTimestamp()})}catch(e){}
-      alert('Đã cấu hình Nguyễn Ngọc Sơn thành Trưởng phòng R&D V2.2.\n\nBước tiếp: sau khi Owner test Hosting Preview OK, chạy 02_DEPLOY_RULES_V2_2_FOR_RND_HEAD_TEST.cmd rồi đăng nhập tài khoản anh Sơn để test quyền tổng quan.');
+      await db.collection('hub_access').doc(RND_HEAD_EMAIL).set({email:RND_HEAD_EMAIL,name:'Nguyễn Ngọc Sơn',role:'rnd',department:'R&D',personnelTitle:'Trưởng phòng R&D',unitCodes:['RD'],active:true,accessModelVersion:'2.2.1',spaces:FV.arrayUnion('rnd','common','ptn'),permissions:FV.arrayUnion('rnd.tech.overview','rnd.response.manage'),updatedAt:FV.serverTimestamp(),updatedBy:email()},{merge:true});
+      try{await db.collection('hub_audit_logs').add({action:'GRANT_RND_HEAD_V221',targetEmail:RND_HEAD_EMAIL,actorUid:currentUser.uid,actorEmail:email(),createdAt:FV.serverTimestamp()})}catch(e){}
+      alert('Đã cấu hình Nguyễn Ngọc Sơn – Trưởng phòng R&D. Sau khi Hosting Preview đạt, mới chạy Rules V2.2 để test quyền đọc public case PTN.');
     }catch(e){alert('Không cấp được quyền: '+(e?.message||e))}
   }
-  window.v22GrantRndHead=v22GrantRndHead;
+  window.v22GrantRndHead=grantRndHead;
 
-  function v22FmtTime(v){
-    if(!v)return '';
-    try{const d=v.toDate?v.toDate():new Date(v);return d.toLocaleString('vi-VN',{hour12:false})}catch(e){return ''}
-  }
-  function v22CanRespond(c){
-    const u=v22Unit(c),r=v22RoleType();
-    if(r==='rnd')return u==='RD';
-    if(r==='quality')return u==='QLCL';
-    if(r==='bod')return u==='BGD';
-    if(r==='office'||r==='hr'){
-      try{return accessUnits().includes(u)}catch(e){return ['HCNS','KT','KHO'].includes(u)}
-    }
+  function fmtTime(v){if(!v)return'';try{const d=v.toDate?v.toDate():new Date(v);return d.toLocaleString('vi-VN',{hour12:false})}catch(e){return''}}
+  function safeId(id){return String(id||'').replace(/[^a-zA-Z0-9_-]/g,'_')}
+  function canRespond(c){
+    const cur=currentUnit(c),src=sourceUnit(c),r=role();
+    if(r==='rnd')return cur==='RD';
+    if(r==='quality')return cur==='QLCL';
+    if(r==='bod')return cur==='BGD';
+    if(r==='office'||r==='hr'){try{return accessUnits().includes(cur)}catch(e){return ['HCNS','KT','KHO'].includes(cur)}}
+    if(r==='head')return cur==='PTN'&&src==='RD';
     return false;
   }
-  function v22ResponseHtml(r){
-    const atts=Array.isArray(r.attachments)?r.attachments:[];
-    const links=Array.isArray(r.externalLinks)?r.externalLinks:[];
-    const files=[...atts.map(a=>a.dataUrl?`<a class="v22-attachment" href="${v22Attr(a.dataUrl)}" download="${v22Attr(a.name||'tep-dinh-kem')}">📎 ${v22Esc(a.name||'Tệp')}</a>`:''),...links.map(u=>`<a class="v22-attachment" href="${v22Attr(u)}" target="_blank" rel="noopener">🔗 Tài liệu liên kết</a>`)].filter(Boolean).join('');
-    return `<div class="v22-response"><div class="v22-response-head"><div><div class="v22-response-title">${v22Esc(r.department||'Bộ phận xử lý')} — ${v22Esc(r.userName||r.userEmail||'')}</div><div class="v22-state-line"><span class="v22-badge ${v22StatusClass(r.responseStatus)}">${v22Esc(r.responseStatus||'Phản hồi')}</span></div></div><div class="v22-response-time">${v22Esc(v22FmtTime(r.createdAt))}</div></div>
-      ${r.description?`<div class="v22-response-section"><label>Mô tả xử lý</label><div>${v22Esc(r.description)}</div></div>`:''}
-      ${r.technicalResult?`<div class="v22-response-section"><label>Kết quả kỹ thuật</label><div>${v22Esc(r.technicalResult)}</div></div>`:''}
-      ${r.proposal?`<div class="v22-response-section"><label>Đề xuất / bước tiếp theo</label><div>${v22Esc(r.proposal)}</div></div>`:''}
-      ${files?`<div class="v22-response-section"><label>Đính kèm / tài liệu</label><div class="v22-attachments">${files}</div></div>`:''}
-    </div>`;
+  function attachmentLinks(arr){
+    return (arr||[]).map(a=>a?.dataUrl?`<a class="v22-attachment" href="${attr(a.dataUrl)}" download="${attr(a.name||'tep-dinh-kem')}">📎 ${esc(a.path||a.name||'Tệp')}</a>`:'').filter(Boolean).join('');
   }
-  function v22SafeId(id){return String(id||'').replace(/[^a-zA-Z0-9_-]/g,'_')}
-  function v22ResponseForm(c){
-    const sid=v22SafeId(c.id);
-    if(!v22CanRespond(c))return '';
-    return `<div class="v22-form"><h4>PHẢN HỒI CỦA BỘ PHẬN XỬ LÝ</h4><div class="v22-form-grid"><div class="v22-field"><label>Trạng thái xử lý</label><select id="v22Status_${sid}"><option>Đang xử lý</option><option>Cần PTN bổ sung thông tin</option><option>Đã xử lý – chờ PTN xác nhận</option><option>Đề nghị chuyển bộ phận khác</option></select></div><div class="v22-field"><label>Ảnh / file nhỏ (tối đa 3 file)</label><input id="v22Files_${sid}" type="file" multiple></div></div>
-      <div class="v22-field"><label>Mô tả xử lý</label><textarea id="v22Desc_${sid}" placeholder="Nêu việc đã kiểm tra/thực hiện..."></textarea></div>
-      <div class="v22-field"><label>Kết quả kỹ thuật</label><textarea id="v22Result_${sid}" placeholder="Kết quả, nguyên nhân, thông số hoặc nhận định kỹ thuật..."></textarea></div>
-      <div class="v22-field"><label>Đề xuất / bước tiếp theo</label><textarea id="v22Proposal_${sid}" placeholder="Đề xuất xử lý tiếp, điều kiện cần PTN bổ sung..."></textarea></div>
-      <div class="v22-field"><label>Link tài liệu lớn (Drive/OneDrive, nếu có)</label><input id="v22Link_${sid}" type="text" placeholder="https://..."></div>
-      <div class="v22-notice warn">Tệp lưu trực tiếp chỉ dành cho ảnh/file nhỏ. File lớn dùng link Drive/OneDrive để tránh vượt giới hạn bản ghi Firestore.</div>
-      <div class="v22-form-actions"><button class="btn primary" onclick="v22SaveResponse('${v22Attr(c.id)}')">Gửi phản hồi có truy vết</button></div></div>`;
+  function responseHtml(r){
+    const files=attachmentLinks(r.attachments);const links=(r.externalLinks||[]).map(u=>`<a class="v22-attachment" href="${attr(u)}" target="_blank" rel="noopener">🔗 Tài liệu liên kết</a>`).join('');
+    return `<div class="v22-response"><div class="v22-response-head"><div><div class="v22-response-title">${esc(r.department||'Bộ phận xử lý')} — ${esc(r.userName||r.userEmail||'')}</div><div class="v22-state-line"><span class="v22-badge ${cls(r.responseStatus)}">${esc(r.responseStatus||'Phản hồi')}</span></div></div><div class="v22-response-time">${esc(fmtTime(r.createdAt))}</div></div>${r.description?`<div class="v22-response-section"><label>Mô tả xử lý</label><div>${esc(r.description)}</div></div>`:''}${r.technicalResult?`<div class="v22-response-section"><label>Kết quả kỹ thuật</label><div>${esc(r.technicalResult)}</div></div>`:''}${r.proposal?`<div class="v22-response-section"><label>Đề xuất / bước tiếp theo</label><div>${esc(r.proposal)}</div></div>`:''}${files||links?`<div class="v22-response-section"><label>Đính kèm / tài liệu</label><div class="v22-attachments">${files}${links}</div></div>`:''}</div>`;
   }
-  function v22ConfirmControls(c,responses){
-    if(!v22IsHead()||!responses.length)return '';
-    const latest=responses[0],s=String(latest.responseStatus||'');
-    if(!s.includes('chờ PTN xác nhận'))return '';
-    return `<div class="v22-confirm"><button class="btn primary" onclick="v22PtnConfirm('${v22Attr(c.id)}',true)">Xác nhận hoàn thành</button><button class="btn" onclick="v22PtnConfirm('${v22Attr(c.id)}',false)">Yêu cầu bộ phận bổ sung</button></div>`;
+  function caseAttachmentsHtml(c){
+    const rows=attachmentRecords(c);if(!rows.length)return'';
+    return `<div class="v22-response-wrap"><h4>TỆP / ẢNH / TÀI LIỆU KHI BÁO CÁO</h4>${rows.map(r=>`<div class="v22-response"><div class="v22-response-head"><div class="v22-response-title">${esc(r.userName||r.userEmail||'Người báo')}</div><div class="v22-response-time">${esc(fmtTime(r.createdAt))}</div></div><div class="v22-attachments">${attachmentLinks(r.attachments)}${(r.externalLinks||[]).map(u=>`<a class="v22-attachment" href="${attr(u)}" target="_blank" rel="noopener">🔗 Link tài liệu</a>`).join('')}</div></div>`).join('')}</div>`;
   }
-  function v22PanelHtml(c,responses){
-    return `<div class="v22-response-wrap"><h4>PHẢN HỒI CỦA BỘ PHẬN XỬ LÝ</h4><div class="v22-notice"><b>Trạng thái liên phòng:</b> ${v22Esc(v22EffectiveStatus(c))}. Phản hồi này là bản ghi phối hợp có truy vết; không thay thế data/kết quả thử nghiệm chính thức.</div>
-      ${responses.length?responses.map(v22ResponseHtml).join(''):'<div class="v22-empty">Chưa có phản hồi chính thức của bộ phận xử lý.</div>'}
-      ${v22ConfirmControls(c,responses)}${v22ResponseForm(c)}</div>`;
+  function responseForm(c){
+    if(!canRespond(c))return'';const sid=safeId(c.id);
+    return `<div class="v22-form"><h4>PHẢN HỒI CỦA BỘ PHẬN XỬ LÝ</h4><div class="v22-form-grid"><div class="v22-field"><label>Trạng thái xử lý</label><select id="v22Status_${sid}"><option>Đang xử lý</option><option>Cần PTN bổ sung thông tin</option><option>Đã xử lý – chờ PTN xác nhận</option><option>Đề nghị chuyển bộ phận khác</option></select></div><div class="v22-field"><label>Ảnh / file nhỏ</label><input id="v22Files_${sid}" type="file" multiple accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"></div></div><div class="v22-field"><label>Mô tả xử lý</label><textarea id="v22Desc_${sid}" placeholder="Nêu việc đã kiểm tra/thực hiện..."></textarea></div><div class="v22-field"><label>Kết quả kỹ thuật</label><textarea id="v22Result_${sid}" placeholder="Kết quả, nguyên nhân, thông số hoặc nhận định kỹ thuật..."></textarea></div><div class="v22-field"><label>Đề xuất / bước tiếp theo</label><textarea id="v22Proposal_${sid}" placeholder="Đề xuất xử lý tiếp hoặc thông tin cần bổ sung..."></textarea></div><div class="v22-field"><label>Link tài liệu/video/thư mục lớn (Drive/OneDrive)</label><input id="v22Link_${sid}" type="text" placeholder="https://..."></div><div class="v22-notice warn">Ảnh/file nhỏ có thể đính trực tiếp. Video, thư mục hoặc file dung lượng lớn nên dùng link Drive/OneDrive để tránh vượt giới hạn Firestore.</div><div class="v22-form-actions"><button class="btn primary" onclick="v22SaveResponse('${attr(c.id)}')">Gửi phản hồi có truy vết</button></div></div>`;
   }
-  async function v22InjectCasePanel(caseId){
-    const c=v22Cases().find(x=>String(x.id)===String(caseId));if(!c)return;
-    const body=document.getElementById('drawerBody');if(!body)return;
-    const slotId='v22Panel_'+v22SafeId(caseId);
-    let slot=document.getElementById(slotId);
-    if(!slot){slot=document.createElement('div');slot.id=slotId;slot.innerHTML='<div class="v22-response-wrap"><div class="v22-empty">Đang tải phản hồi liên phòng...</div></div>';body.appendChild(slot)}
-    const responses=await v22LoadResponses(caseId);
-    slot.innerHTML=v22PanelHtml(c,responses);
+  function confirmControls(c){
+    if(!isHead())return'';const r=latestResponse(c);if(!r||!String(r.responseStatus||'').includes('chờ PTN xác nhận'))return'';
+    return `<div class="v22-confirm"><button class="btn primary" onclick="v22PtnConfirm('${attr(c.id)}',true)">Xác nhận hoàn thành</button><button class="btn" onclick="v22PtnConfirm('${attr(c.id)}',false)">Yêu cầu bộ phận bổ sung</button></div>`;
   }
+  function chatHtml(c){
+    const rows=chats(c).slice().reverse();const sid=safeId(c.id);
+    return `<div class="v22-chat"><div class="v22-chat-head"><b>Trao đổi nhanh PTN ↔ bộ phận xử lý</b><span>Không dùng chat thay cho kết luận/VM chính thức.</span></div><div class="v22-chat-messages" id="v22ChatMessages_${sid}">${rows.length?rows.map(m=>`<div class="v22-chat-msg ${m.userEmail===email()?'mine':''}"><b>${esc(m.userName||m.userEmail||'')}</b><span>${esc(fmtTime(m.createdAt))}</span><div>${esc(m.message||'')}</div></div>`).join(''):'<div class="v22-empty">Chưa có trao đổi nhanh.</div>'}</div><div class="v22-chat-input"><input id="v22ChatInput_${sid}" placeholder="Hỏi/đáp nhanh về case này..." onkeydown="if(event.key==='Enter')v22SendChat('${attr(c.id)}')"><button class="btn primary" onclick="v22SendChat('${attr(c.id)}')">Gửi</button></div></div>`;
+  }
+  function panelHtml(c){
+    const rs=responses(c);
+    return `${caseAttachmentsHtml(c)}<div class="v22-response-wrap"><h4>PHẢN HỒI CỦA BỘ PHẬN XỬ LÝ</h4><div class="v22-notice"><b>Trạng thái:</b> ${esc(effectiveStatus(c))}. Phản hồi chính thức phải ghi tại đây; chat chỉ để hỏi đáp nhanh.</div>${rs.length?rs.map(responseHtml).join(''):'<div class="v22-empty">Chưa có phản hồi chính thức của bộ phận xử lý.</div>'}${confirmControls(c)}${responseForm(c)}${chatHtml(c)}</div>`;
+  }
+  async function injectPanel(caseId){
+    const c=cases().find(x=>String(x.id)===String(caseId));if(!c)return;
+    const body=document.getElementById('drawerBody');if(!body)return;const id='v22Panel_'+safeId(caseId);let slot=document.getElementById(id);
+    if(!slot){slot=document.createElement('div');slot.id=id;slot.innerHTML='<div class="v22-empty">Đang tải phối hợp liên phòng...</div>';body.appendChild(slot)}
+    await loadComments(caseId);slot.innerHTML=panelHtml(c);
+  }
+  try{if(typeof openCaseDetail==='function'){const old=openCaseDetail;openCaseDetail=function(id){const out=old.apply(this,arguments);setTimeout(()=>injectPanel(id),0);return out}}}catch(e){}
 
-  // Preserve original case detail then append V2.2 response/history controls.
+  function readData(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result||''));r.onerror=()=>rej(r.error||new Error('Không đọc được file'));r.readAsDataURL(file)})}
+  function loadImg(data){return new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=()=>rej(new Error('Không đọc được ảnh'));i.src=data})}
+  async function pack(file,path){
+    const isImg=String(file.type||'').startsWith('image/');
+    if(!isImg){if(file.size>180000)throw new Error(`File ${file.name} lớn hơn 180 KB. Hãy dùng link Drive/OneDrive.`);return{name:file.name,path:path||file.webkitRelativePath||file.name,type:file.type||'application/octet-stream',size:file.size,dataUrl:await readData(file)}}
+    const raw=await readData(file);if(raw.length<=240000)return{name:file.name,path:path||file.webkitRelativePath||file.name,type:file.type||'image/jpeg',size:file.size,dataUrl:raw};
+    const img=await loadImg(raw);let w=img.width,h=img.height,max=1280;if(Math.max(w,h)>max){const q=max/Math.max(w,h);w=Math.round(w*q);h=Math.round(h*q)}const cv=document.createElement('canvas');cv.width=w;cv.height=h;cv.getContext('2d').drawImage(img,0,0,w,h);let q=.76,out='';while(q>=.42){out=cv.toDataURL('image/jpeg',q);if(out.length<=280000)break;q-=.08}if(out.length>320000)throw new Error(`Ảnh ${file.name} quá lớn. Hãy dùng link Drive/OneDrive.`);return{name:file.name.replace(/\.[^.]+$/,'.jpg'),path:path||file.webkitRelativePath||file.name,type:'image/jpeg',size:Math.round(out.length*.75),dataUrl:out};
+  }
+  async function buildAttachments(files,folderFiles){
+    const src=[...(files||[]),...(folderFiles||[])].slice(0,8);const arr=[];let total=0;
+    for(const f of src){const a=await pack(f,f.webkitRelativePath||f.name);total+=String(a.dataUrl||'').length;if(total>540000)throw new Error('Tổng tệp đính kèm quá lớn. Giảm số file hoặc dùng link thư mục Drive/OneDrive.');arr.push(a)}return arr;
+  }
+  async function addEvent(caseId,action,detail){try{await db.collection('hub_case_events').add({caseId,action,detail:detail||'',actorUid:currentUser.uid,actorEmail:email(),actorName:currentUser.displayName||email(),createdAt:FV.serverTimestamp(),schemaVersion:'2.2.1'})}catch(e){}}
+
+  async function saveResponse(caseId){
+    const c=cases().find(x=>String(x.id)===String(caseId));if(!c||!canRespond(c)){alert('Tài khoản không có quyền phản hồi case này.');return}
+    const sid=safeId(caseId),status=document.getElementById('v22Status_'+sid)?.value||'Đang xử lý',description=document.getElementById('v22Desc_'+sid)?.value.trim()||'',technicalResult=document.getElementById('v22Result_'+sid)?.value.trim()||'',proposal=document.getElementById('v22Proposal_'+sid)?.value.trim()||'',link=document.getElementById('v22Link_'+sid)?.value.trim()||'';
+    if(!description&&!technicalResult&&!proposal){alert('Cần nhập ít nhất mô tả xử lý, kết quả kỹ thuật hoặc đề xuất.');return}if(link&&!/^https?:\/\//i.test(link)){alert('Link phải bắt đầu bằng http:// hoặc https://');return}
+    try{
+      const attachments=await buildAttachments(Array.from(document.getElementById('v22Files_'+sid)?.files||[]),[]);
+      await db.collection('hub_comments').add({caseId:String(caseId),type:'department_response',department:currentLabel(c),departmentCode:currentUnit(c),responseStatus:status,description,technicalResult,proposal,attachments,externalLinks:link?[link]:[],userUid:currentUser.uid,userEmail:email(),userName:currentUser.displayName||email(),createdAt:FV.serverTimestamp(),schemaVersion:'2.2.1'});
+      await addEvent(String(caseId),'DEPARTMENT_RESPONSE',`${currentLabel(c)}: ${status}`);await loadComments(caseId);await injectPanel(caseId);alert('Đã gửi phản hồi và lưu truy vết.');
+    }catch(e){alert('Không lưu được phản hồi: '+(e?.message||e))}
+  }
+  window.v22SaveResponse=saveResponse;
+
+  async function sendChat(caseId){
+    const sid=safeId(caseId),input=document.getElementById('v22ChatInput_'+sid),msg=input?.value.trim()||'';if(!msg)return;
+    try{await db.collection('hub_comments').add({caseId:String(caseId),type:'interdept_chat',message:msg,userUid:currentUser.uid,userEmail:email(),userName:currentUser.displayName||email(),createdAt:FV.serverTimestamp(),schemaVersion:'2.2.1'});input.value='';await loadComments(caseId);await injectPanel(caseId)}catch(e){alert('Không gửi được chat: '+(e?.message||e))}
+  }
+  window.v22SendChat=sendChat;
+
+  async function ptnConfirm(caseId,approved){
+    if(!isHead()){alert('Chỉ Trưởng phòng PTN được xác nhận kết quả xử lý.');return}const c=cases().find(x=>String(x.id)===String(caseId));if(!c)return;const oldUnit=currentUnit(c),oldDesk=currentLabel(c);
+    try{
+      const ref=db.collection('hub_cases').doc(String(caseId));
+      if(approved){await ref.update({status:'Đã xử lý',currentDesk:'PTN',currentSpace:'ptn',currentUnitCode:'PTN',lastExternalUnitCode:oldUnit,lastExternalDesk:oldDesk,interdeptPair:oldUnit==='RD'?'PTN-RD':c.interdeptPair||'',updatedAt:FV.serverTimestamp()});await addEvent(String(caseId),'PTN_CONFIRM_RESPONSE',`PTN xác nhận hoàn thành phản hồi của ${oldDesk}`)}
+      else{await ref.update({status:`Chờ ${oldDesk} bổ sung`,updatedAt:FV.serverTimestamp()});await addEvent(String(caseId),'PTN_REQUEST_MORE',`PTN yêu cầu ${oldDesk} bổ sung phản hồi`)}
+      const local=cases().find(x=>String(x.id)===String(caseId));if(local){local.status=approved?'Đã xử lý':`Chờ ${oldDesk} bổ sung`;if(approved){local.currentDesk='PTN';local.currentSpace='ptn';local.currentUnitCode='PTN';local.lastExternalUnitCode=oldUnit;local.lastExternalDesk=oldDesk;if(oldUnit==='RD')local.interdeptPair='PTN-RD'}}
+      try{if(typeof closeDrawer==='function')closeDrawer()}catch(e){}setTimeout(()=>{try{if(typeof nav==='function')nav('ptn')}catch(e){}},100);
+    }catch(e){alert('Không cập nhật được trạng thái PTN: '+(e?.message||e))}
+  }
+  window.v22PtnConfirm=ptnConfirm;
+
+  // Bổ sung tệp/ảnh/video/thư mục vào form Tạo bản ghi hiện có mà không thay nghiệp vụ createCase gốc.
   try{
-    if(typeof openCaseDetail==='function'){
-      const oldOpenCaseDetail=openCaseDetail;
-      openCaseDetail=function(id){
-        const out=oldOpenCaseDetail.apply(this,arguments);
-        setTimeout(()=>v22InjectCasePanel(id),0);
+    if(typeof openCreateCase==='function'){
+      const oldOpen=openCreateCase;openCreateCase=function(){const out=oldOpen.apply(this,arguments);setTimeout(()=>{
+        const body=document.getElementById('drawerBody');if(!body||document.getElementById('cV22Files'))return;
+        const box=document.createElement('div');box.className='v22-form';box.id='v22CreateAttachments';box.innerHTML=`<h4>TỆP / ẢNH / VIDEO / THƯ MỤC ĐÍNH KÈM</h4><div class="v22-field"><label>Chọn file, ảnh hoặc video</label><input id="cV22Files" type="file" multiple accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"></div><div class="v22-field"><label>Chọn thư mục (Chrome/Edge)</label><input id="cV22Folder" type="file" multiple webkitdirectory directory></div><div class="v22-field"><label>Link file/thư mục lớn trên Drive/OneDrive</label><input id="cV22Link" type="text" placeholder="https://..."></div><div class="v22-notice warn">File nhỏ lưu kèm bản ghi. Video, thư mục lớn hoặc nhiều file nên dùng link Drive/OneDrive.</div>`;body.appendChild(box);
+      },0);return out};
+    }
+  }catch(e){console.warn('V2.2.1 create form attachment injection skipped',e)}
+
+  try{
+    if(typeof createCase==='function'){
+      const oldCreate=createCase;createCase=async function(){
+        let expected='';try{if(typeof nextCaseCode==='function')expected=nextCaseCode()}catch(e){}
+        const files=Array.from(document.getElementById('cV22Files')?.files||[]),folders=Array.from(document.getElementById('cV22Folder')?.files||[]),link=document.getElementById('cV22Link')?.value.trim()||'';
+        if(link&&!/^https?:\/\//i.test(link)){alert('Link đính kèm phải bắt đầu bằng http:// hoặc https://');return}
+        const out=await Promise.resolve(oldCreate.apply(this,arguments));
+        if(!files.length&&!folders.length&&!link)return out;
+        try{
+          await new Promise(r=>setTimeout(r,300));
+          let id=expected;if(!id){const first=cases()[0];id=first?.id||''}if(!id)throw new Error('Không xác định được mã VM vừa tạo.');
+          const attachments=await buildAttachments(files,folders);
+          await db.collection('hub_comments').add({caseId:String(id),type:'case_attachment',attachments,externalLinks:link?[link]:[],userUid:currentUser.uid,userEmail:email(),userName:currentUser.displayName||email(),createdAt:FV.serverTimestamp(),schemaVersion:'2.2.1'});
+          await addEvent(String(id),'CASE_ATTACHMENT_ADD',`Đính kèm ${attachments.length} file${link?' + link tài liệu':''}`);CACHE.delete(String(id));
+        }catch(e){alert('Bản ghi đã tạo nhưng tệp đính kèm chưa lưu được: '+(e?.message||e))}
         return out;
       };
     }
-  }catch(e){console.warn('V2.2 detail wrapper skipped',e)}
+  }catch(e){console.warn('V2.2.1 createCase wrapper skipped',e)}
 
-  function v22ReadAsDataURL(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result||''));r.onerror=()=>reject(r.error||new Error('Không đọc được file'));r.readAsDataURL(file)})}
-  function v22LoadImage(dataUrl){return new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error('Không đọc được ảnh'));img.src=dataUrl})}
-  async function v22Attachment(file){
-    const isImage=String(file.type||'').startsWith('image/');
-    if(!isImage){
-      if(file.size>180000)throw new Error(`File ${file.name} lớn hơn 180 KB. Hãy dùng link Drive/OneDrive.`);
-      return {name:file.name,type:file.type||'application/octet-stream',size:file.size,dataUrl:await v22ReadAsDataURL(file)};
-    }
-    const raw=await v22ReadAsDataURL(file);
-    if(raw.length<=240000)return {name:file.name,type:file.type||'image/jpeg',size:file.size,dataUrl:raw};
-    const img=await v22LoadImage(raw);let w=img.width,h=img.height;const max=1280;
-    if(Math.max(w,h)>max){const r=max/Math.max(w,h);w=Math.round(w*r);h=Math.round(h*r)}
-    const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0,w,h);
-    let q=.76,out='';
-    while(q>=.42){out=canvas.toDataURL('image/jpeg',q);if(out.length<=280000)break;q-=.08}
-    if(out.length>320000)throw new Error(`Ảnh ${file.name} vẫn quá lớn sau nén. Hãy dùng link Drive/OneDrive.`);
-    return {name:file.name.replace(/\.[^.]+$/,'.jpg'),type:'image/jpeg',size:Math.round(out.length*.75),dataUrl:out};
-  }
-  function v22DepartmentForCase(c){return v22DeskLabel(c)}
-  async function v22AddEvent(caseId,action,detail){
-    try{await db.collection('hub_case_events').add({caseId,action,detail:detail||'',actorUid:currentUser.uid,actorEmail:v22Email(),actorName:currentUser.displayName||v22Email(),createdAt:FV.serverTimestamp(),schemaVersion:'2.2'})}catch(e){console.warn('V2.2 audit event skipped',e?.code||e?.message||e)}
-  }
-  async function v22SaveResponse(caseId){
-    const c=v22Cases().find(x=>String(x.id)===String(caseId));if(!c||!v22CanRespond(c)){alert('Tài khoản không có quyền phản hồi case này.');return}
-    const sid=v22SafeId(caseId);
-    const status=document.getElementById('v22Status_'+sid)?.value||'Đang xử lý';
-    const description=document.getElementById('v22Desc_'+sid)?.value.trim()||'';
-    const technicalResult=document.getElementById('v22Result_'+sid)?.value.trim()||'';
-    const proposal=document.getElementById('v22Proposal_'+sid)?.value.trim()||'';
-    const link=document.getElementById('v22Link_'+sid)?.value.trim()||'';
-    if(!description&&!technicalResult&&!proposal){alert('Cần nhập ít nhất mô tả xử lý, kết quả kỹ thuật hoặc đề xuất.');return}
-    if(link&&!/^https?:\/\//i.test(link)){alert('Link tài liệu phải bắt đầu bằng http:// hoặc https://');return}
-    try{
-      const files=Array.from(document.getElementById('v22Files_'+sid)?.files||[]).slice(0,3);
-      const attachments=[];let totalChars=0;
-      for(const file of files){const a=await v22Attachment(file);totalChars+=String(a.dataUrl||'').length;if(totalChars>520000)throw new Error('Tổng file đính kèm quá lớn. Hãy giảm số file hoặc dùng link Drive/OneDrive.');attachments.push(a)}
-      const payload={
-        caseId:String(caseId),type:'department_response',department:v22DepartmentForCase(c),departmentCode:v22Unit(c),responseStatus:status,description,technicalResult,proposal,attachments,externalLinks:link?[link]:[],
-        userUid:currentUser.uid,userEmail:v22Email(),userName:currentUser.displayName||v22Email(),roleLabel:(()=>{try{return R().label}catch(e){return ''}})(),createdAt:FV.serverTimestamp(),schemaVersion:'2.2'
-      };
-      await db.collection('hub_comments').add(payload);
-      await v22AddEvent(String(caseId),'DEPARTMENT_RESPONSE',`${v22DepartmentForCase(c)}: ${status}`);
-      await v22LoadResponses(caseId);
-      await v22InjectCasePanel(caseId);
-      alert('Đã gửi phản hồi và lưu truy vết.');
-    }catch(e){alert('Không lưu được phản hồi: '+(e?.message||e))}
-  }
-  window.v22SaveResponse=v22SaveResponse;
-
-  async function v22PtnConfirm(caseId,approved){
-    if(!v22IsHead()){alert('Chỉ Trưởng phòng PTN được xác nhận kết quả xử lý.');return}
-    const c=v22Cases().find(x=>String(x.id)===String(caseId));if(!c)return;
-    const oldDesk=v22DeskLabel(c),oldUnit=v22Unit(c);
-    try{
-      const ref=db.collection('hub_cases').doc(String(caseId));
-      if(approved){
-        await ref.update({status:'Đã xử lý',currentDesk:'PTN',currentSpace:'ptn',currentUnitCode:'PTN',updatedAt:FV.serverTimestamp()});
-        await v22AddEvent(String(caseId),'PTN_CONFIRM_RESPONSE',`Trưởng phòng PTN xác nhận hoàn thành phản hồi của ${oldDesk}`);
-      }else{
-        await ref.update({status:`Chờ ${oldDesk} bổ sung`,updatedAt:FV.serverTimestamp()});
-        await v22AddEvent(String(caseId),'PTN_REQUEST_MORE',`PTN yêu cầu ${oldDesk} bổ sung phản hồi`);
-      }
-      const local=v22Cases().find(x=>String(x.id)===String(caseId));
-      if(local){local.status=approved?'Đã xử lý':`Chờ ${oldDesk} bổ sung`;if(approved){local.currentDesk='PTN';local.currentSpace='ptn';local.currentUnitCode='PTN'}local.updatedAt=new Date().toLocaleString('vi-VN')}
-      try{if(typeof closeDrawer==='function')closeDrawer()}catch(e){}
-      setTimeout(()=>{try{if(typeof nav==='function')nav('ptn')}catch(e){}},100);
-    }catch(e){alert('Không cập nhật được trạng thái PTN: '+(e?.message||e))}
-  }
-  window.v22PtnConfirm=v22PtnConfirm;
-
-  // Refresh visible version text if source used a slightly different wrapper.
   setTimeout(()=>{
-    document.querySelectorAll('small,div,span').forEach(el=>{
-      if(el.children.length===0 && /Phiên bản V2\.1\.1/.test(el.textContent||''))el.textContent=(el.textContent||'').replace(/Phiên bản V2\.1\.1/,'Phiên bản V2.2');
-    });
-    console.info('HUB-PTN V2.2 interdepartment workflow loaded');
+    document.querySelectorAll('small,div,span').forEach(el=>{if(el.children.length===0&&/Phiên bản V2\.(1\.1|2)(?!\.)/.test(el.textContent||''))el.textContent=(el.textContent||'').replace(/Phiên bản V2\.(1\.1|2)(?!\.)/,'Phiên bản V2.2.1')});
+    console.info('HUB-PTN V2.2.1 loaded');
   },0);
 })();
