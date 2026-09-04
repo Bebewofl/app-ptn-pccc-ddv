@@ -1,1 +1,0 @@
-FIX1: Bộ dựng V2.2 đã sửa lỗi nhận diện Firestore Rules V2.1. Thay vì phụ thuộc tên hàm canReadCaseData(d), script tìm trực tiếp match /hub_cases/{...} và bổ sung một allow read riêng cho permission rnd.tech.overview. Preview vẫn không deploy Rules.
