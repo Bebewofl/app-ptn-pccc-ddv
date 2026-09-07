@@ -1,0 +1,42 @@
+name: "HUB - 0. Kiểm tra bản mới"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Lấy nguồn HUB V2.2.5
+        uses: actions/checkout@v4
+        with:
+          ref: hub-v225-oneclick
+
+      - name: Chuẩn bị Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Kiểm tra cú pháp và build
+        run: |
+          node --check hub-v22.js
+          node --check hub-v223-rndfix.js
+          node --check hub-v224-chat.js
+          node --check hub-v225-core.js
+          node scripts/build-hub.mjs
+
+      - name: Lưu bản build kiểm tra
+        uses: actions/upload-artifact@v4
+        with:
+          name: HUB-V2.2.5-CHECK
+          path: |
+            dist
+            VERSION.json
+            firebase.generated.json
+          retention-days: 7
+
+      - name: Kết quả
+        run: echo "HUB V2.2.5 build OK. Chưa deploy Firebase, Production không thay đổi."
