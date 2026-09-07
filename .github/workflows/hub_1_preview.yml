@@ -1,0 +1,65 @@
+name: "HUB - 1. Chạy Preview"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Lấy đúng nguồn HUB mới nhất
+        uses: actions/checkout@v4
+        with:
+          ref: hub-v225-oneclick
+
+      - name: Chuẩn bị Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build HUB V2.2.5
+        run: |
+          node --check hub-v22.js
+          node --check hub-v223-rndfix.js
+          node --check hub-v224-chat.js
+          node --check hub-v225-core.js
+          node scripts/build-hub.mjs
+
+      - name: Lưu bản build để truy vết
+        uses: actions/upload-artifact@v4
+        with:
+          name: HUB-V2.2.5-PREVIEW-BUILD
+          path: |
+            dist
+            firebase.generated.json
+            VERSION.json
+          retention-days: 30
+
+      - name: Kiểm tra quyền Firebase
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          if [ -z "$FIREBASE_TOKEN" ]; then
+            echo "::error::Chưa có FIREBASE_TOKEN. Đây là cấu hình 1 lần duy nhất cho GitHub Actions."
+            exit 1
+          fi
+
+      - name: Cài Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Đưa lên Preview
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          firebase hosting:channel:deploy hub-v225-candidate \
+            --expires 30d \
+            --project app-ptn-pccc \
+            --config firebase.generated.json \
+            --token "$FIREBASE_TOKEN"
+
+      - name: Hoàn tất
+        run: |
+          echo "Preview HUB V2.2.5 đã hoàn tất. Production chưa thay đổi."
