@@ -1,0 +1,77 @@
+name: "HUB - 3. Quay lại V2.1.1"
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Gõ chính xác: QUAY LAI V2.1.1"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kiểm tra xác nhận
+        run: |
+          if [ "${{ inputs.confirm }}" != "QUAY LAI V2.1.1" ]; then
+            echo "::error::Chưa xác nhận đúng. Production không thay đổi."
+            exit 1
+          fi
+
+      - name: Lấy mốc HUB ổn định
+        uses: actions/checkout@v4
+        with:
+          ref: hub-v225-oneclick
+
+      - name: Kiểm tra baseline V2.1.1
+        run: |
+          if [ ! -f baseline/v211/index.html ]; then
+            echo "::error::Chưa có snapshot V2.1.1 trong GitHub. Không rollback để tránh sai bản."
+            exit 1
+          fi
+
+      - name: Chuẩn bị bản rollback
+        run: |
+          rm -rf dist
+          cp -R baseline/v211 dist
+          cat > firebase.rollback.json <<'JSON'
+          {
+            "hosting": {
+              "public": "dist",
+              "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+              "headers": [
+                {"source": "/index.html", "headers": [{"key": "Cache-Control", "value": "no-store, max-age=0"}]}
+              ],
+              "rewrites": [{"source": "**", "destination": "/index.html"}]
+            }
+          }
+          JSON
+
+      - name: Kiểm tra quyền Firebase
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          if [ -z "$FIREBASE_TOKEN" ]; then
+            echo "::error::Chưa có FIREBASE_TOKEN. Production không thay đổi."
+            exit 1
+          fi
+
+      - name: Cài Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Rollback Hosting về V2.1.1
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          firebase deploy --only hosting \
+            --project app-ptn-pccc \
+            --config firebase.rollback.json \
+            --token "$FIREBASE_TOKEN"
+
+      - name: Hoàn tất
+        run: |
+          echo "Hosting HUB đã quay về snapshot V2.1.1. Firestore Rules không bị thay đổi."
