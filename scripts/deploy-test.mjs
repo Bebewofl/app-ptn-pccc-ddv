@@ -1,0 +1,11 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {spawnSync} from 'node:child_process';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const info=JSON.parse(await fs.readFile(path.join(root,'dist/build-info.json'),'utf8'));
+const config=JSON.parse(await fs.readFile(path.join(root,'firebase.test.generated.json'),'utf8'));
+if(info.projectId!=='hub-ptn-test'||info.environment!=='test'||config.hosting.public!=='dist'||config.firestore.rules!=='rules/firestore.candidate.rules')throw Error('Refusing deployment: test configuration mismatch');
+const result=spawnSync(process.execPath,[path.join(root,'node_modules/firebase-tools/lib/bin/firebase.js'),'deploy','--only','hosting,firestore:rules','--project','hub-ptn-test','--config','firebase.test.generated.json','--non-interactive'],{cwd:root,stdio:'inherit'});
+if(result.error)throw result.error;
+process.exit(result.status??1);

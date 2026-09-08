@@ -3,5 +3,6 @@
   "display": "Phiên bản V2.2.5 · Tạo bởi Dương Đức Vượng",
   "baseline": "HUB V2.1.1 production",
   "previewChannel": "hub-v225-candidate",
-  "projectId": "app-ptn-pccc"
+  "projectId": "hub-ptn-test",
+  "environment": "test"
 }

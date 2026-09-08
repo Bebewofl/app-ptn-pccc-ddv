@@ -27,4 +27,4 @@ Trước khi công nhận Preview đạt cần kiểm tra bằng emulator và ha
 
 Các bài test client dùng Firebase/DOM giả lập. Bộ `npm run test:rules` bổ sung kiểm thử Rules bằng Firestore Emulator, gồm hai client realtime độc lập. Các bài này không thay thế nghiệm thu bằng trình duyệt và tài khoản thực tế trên môi trường test.
 
-Production được giữ nguyên. Không có workflow xuất Production hoặc Rules hoạt động trong develop. Các workflow cũ trên main chưa sửa theo yêu cầu giữ main an toàn; không chạy chúng để phát hành bản hợp nhất.
+Production được giữ nguyên. Workflow develop chỉ có thể xuất Hosting và Rules candidate sang **hub-ptn-test**. Các workflow cũ trên main chưa sửa theo yêu cầu giữ main an toàn; không chạy chúng để phát hành bản hợp nhất.

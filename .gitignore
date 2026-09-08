@@ -1,4 +1,5 @@
 dist/
 firebase.generated.json
+firebase.test.generated.json
 node_modules/
 *.log

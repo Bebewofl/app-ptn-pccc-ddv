@@ -25,7 +25,7 @@ Kết quả tại máy ngày 08/09/2026: 10/10 bài Rules emulator đạt. Đã 
 
 ## Điều kiện trước nghiệm thu
 
-1. Rules và Hosting candidate phải cùng được thử trên Firebase project test riêng hoặc emulator. Hosting Preview hiện vẫn trỏ project dùng chung `app-ptn-pccc`; chạy Hosting Preview một mình không cập nhật quyền backend và có thể tiếp tục báo permission-denied.
+1. Rules và Hosting candidate phải cùng được thử trên Firebase project test riêng hoặc emulator. Project **hub-ptn-test** đã được người dùng tạo; workflow develop đã chuyển cả Hosting và Rules sang project này. Chưa coi là đã triển khai nếu chưa có kết quả workflow thành công.
 2. Kiểm tra document `hub_cases` thật không có nội dung riêng tư trong `confidential` hoặc trường khác. Cho đọc document là cho đọc mọi trường: không thể bảo đảm che dữ liệu bằng việc ẩn UI. Chưa đọc dữ liệu thật và chưa thực hiện migration.
 3. Ghi chú legacy thiếu unitCode được giữ cho quản lý. Nếu cần mở lại cho bộ phận, cần xác minh nguồn gốc từng ghi chú trước migration, không suy từ nơi VM đang xử lý.
 4. Nghiệm thu bằng tài khoản PTN/R&D thực tế và trình duyệt, gồm ảnh/file lớn, đổi phòng, đăng xuất, đổi thread. Kết quả emulator không đồng nghĩa Preview đã đạt.

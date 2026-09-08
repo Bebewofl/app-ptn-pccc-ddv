@@ -27,4 +27,13 @@ test('offline build is reproducible and ships only canonical source with complet
   assert.ok(Object.keys(first).every(f=>!f.includes('archive')&&!f.endsWith('.ps1')&&!f.endsWith('.cmd')));
   const cfg=JSON.parse(await fs.readFile(path.join(root,'firebase.generated.json'),'utf8'));
   assert.deepEqual(Object.keys(cfg),['hosting']);
+  const init=await fs.readFile(path.join(root,'dist/firebase-init.js'),'utf8');
+  assert.ok(init.includes('"projectId":"hub-ptn-test"'));
+  assert.ok(!init.includes('app-ptn-pccc'));
+  assert.ok(!html.includes('/__/firebase/init.js'));
+  assert.ok(html.includes('Chỉ dùng dữ liệu thử nghiệm'));
+  const info=JSON.parse(await fs.readFile(path.join(root,'dist/build-info.json'),'utf8'));
+  assert.equal(info.projectId,'hub-ptn-test');
+  const deployConfig=JSON.parse(await fs.readFile(path.join(root,'firebase.test.generated.json'),'utf8'));
+  assert.equal(deployConfig.firestore.rules,'rules/firestore.candidate.rules');
 });

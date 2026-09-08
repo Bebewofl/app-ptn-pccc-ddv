@@ -29,6 +29,8 @@ jobs:
             dist
             VERSION.json
             firebase.generated.json
+            firebase.test.generated.json
+            rules/firestore.candidate.rules
           retention-days: 30
       - name: Kiểm tra cấu hình Firebase
         env:
@@ -38,8 +40,10 @@ jobs:
             echo "::error::Thiếu FIREBASE_TOKEN; chưa deploy Preview."
             exit 1
           fi
-      - name: Hosting Preview only
+      - name: Deploy Hosting and Rules to HUB PTN TEST only
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
         run: |
-          npx --no-install firebase hosting:channel:deploy hub-v225-candidate --expires 30d --project app-ptn-pccc --config firebase.generated.json --token "$FIREBASE_TOKEN" --non-interactive
+          node scripts/deploy-test.mjs
+      - name: Link bản test
+        run: echo "HUB PTN TEST — https://hub-ptn-test.web.app" >> "$GITHUB_STEP_SUMMARY"

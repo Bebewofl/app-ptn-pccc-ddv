@@ -7,7 +7,7 @@ Nguồn phát triển duy nhất: `Bebewofl/app-ptn-pccc-ddv`, nhánh `develop`.
 
 1. GitHub Desktop: chọn đúng repo HUB, nhánh `develop`, Fetch/Pull.
 2. Kiểm tra kết quả **HUB - 0. Kiểm tra bản mới** của commit vừa cập nhật.
-3. Chạy **HUB - 1. Chạy Preview**, chọn nhánh **develop**. Workflow chỉ xuất Hosting vào `hub-v225-candidate`.
+3. Sau khi tạo Authentication và Firestore trong project test, chạy **HUB - 1. Chạy Preview**, chọn nhánh **develop**. Workflow xuất Hosting và Rules candidate vào **hub-ptn-test**, mở tại `https://hub-ptn-test.web.app` sau khi triển khai thành công.
 4. Test theo [ma trận Preview](docs/PREVIEW-CHECKLIST.md). Chưa được coi là đạt nếu thiếu kiểm thử quyền bằng Rules thực tế.
 
 Không dùng ZIP, Downloads, CMD/PS1 để tạo bản mới. Không dùng các nút Production/Rollback cũ trên `main`: chúng vẫn trỏ nhánh lịch sử `hub-v225-oneclick` và nằm ngoài đợt sửa này.
@@ -23,8 +23,10 @@ Không dùng ZIP, Downloads, CMD/PS1 để tạo bản mới. Không dùng các 
 - `npm ci` rồi `npm run test:rules`: kiểm thử Rules bằng Firestore Emulator (Java 21), project `demo-*`, không dùng dữ liệu thật. GitHub tự chạy bước này trước Preview.
 - `dist/build-info.json`: phiên bản, commit nguồn và mã kiểm tra nội dung nguồn.
 
-Preview cần secret `FIREBASE_TOKEN` hiện dùng bởi workflow cũ. Không nhập token vào code/chat. Workflow này không triển khai Rules. Preview Hosting vẫn dùng Firebase project `app-ptn-pccc`, do đó đăng nhập và dữ liệu Firestore dùng chung với production; chỉ tạo VM test được thống nhất, không sửa VM nghiệp vụ thật.
+Preview cần secret `FIREBASE_TOKEN` của tài khoản có quyền trên **hub-ptn-test**. Không nhập token vào code/chat. Workflow triển khai cả Hosting và Rules chỉ vào project test. Production `app-ptn-pccc` không được dùng làm đích bởi workflow develop.
 
 Chi tiết rà soát: [CONSOLIDATION.md](docs/CONSOLIDATION.md).
 
-Rules nhận từ người dùng và bản candidate được tách tại `rules/`. [Rà soát quyền và giới hạn triển khai](docs/RULES-REVIEW.md). Candidate thay đổi cách đọc private notes và truy vấn chat; Hosting và Rules phải được kiểm thử cùng nhau trên môi trường test. Workflow Hosting Preview không cập nhật Rules của Firebase project dùng chung.
+Rules nhận từ người dùng và bản candidate được tách tại `rules/`. [Rà soát quyền và giới hạn triển khai](docs/RULES-REVIEW.md). Candidate thay đổi cách đọc private notes và truy vấn chat; Hosting và Rules được kiểm thử cùng nhau trên project test riêng. Cấu hình Web do người dùng cung cấp nằm tại `config/firebase.test.json`; build không dùng Firebase init tự động của site đang mở.
+
+Thiết lập một lần trên Firebase **hub-ptn-test**: bật Authentication → Google, tạo Firestore `(default)` ở Production mode (quyền đóng ban đầu). Sau đó chạy workflow develop. Khi đăng nhập lần đầu, owner dùng tài khoản quản lý HUB hiện tại; cấp quyền cho tài khoản R&D qua chức năng cấu hình Trưởng phòng R&D trong app test.
