@@ -1,0 +1,337 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null && request.auth.token.email != null;
+    }
+
+    function email() {
+      return request.auth.token.email;
+    }
+
+    function isOwner() {
+      return signedIn() && email() == "bebewofl@gmail.com";
+    }
+
+    function isOfficialPilot() {
+      return signedIn() && email() in [
+        "dowait17@gmail.com",
+        "phanngoctuyen28022003@gmail.com",
+        "tuyent0319@gmail.com",
+        "nguyenanhtu7121941@gmail.com"
+      ];
+    }
+
+    function officialRole() {
+      return email() == "dowait17@gmail.com" ? "lead3tr" :
+             email() == "phanngoctuyen28022003@gmail.com" ? "leadkn" :
+             email() == "tuyent0319@gmail.com" ? "leadknnight" :
+             email() == "nguyenanhtu7121941@gmail.com" ? "leadatas" :
+             "";
+    }
+
+    function officialGroups() {
+      return email() == "dowait17@gmail.com" ? ["3TR"] :
+             email() == "phanngoctuyen28022003@gmail.com" ? ["KN"] :
+             email() == "tuyent0319@gmail.com" ? ["KN"] :
+             email() == "nguyenanhtu7121941@gmail.com" ? ["ATAS"] :
+             [];
+    }
+
+    function officialUnits() {
+      return isOfficialPilot() ? ["PTN"] : [];
+    }
+
+    function units() {
+      return isOwner() ? ["PTN","RD","HCNS","KT","KHO","QLCL","BGD"] :
+             (isOfficialPilot() ? officialUnits() :
+              (accessExists() && access().unitCodes is list ? access().unitCodes : []));
+    }
+
+    function permissions() {
+      return isOwner() ? ["*"] :
+             (accessExists() && access().permissions is list ? access().permissions : []);
+    }
+
+    function hasPermission(p) {
+      return isOwner() || "*" in permissions() || p in permissions();
+    }
+
+    function hasUnit(u) {
+      return isOwner() || u in units();
+    }
+
+    function accessExists() {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/hub_access/$(email()));
+    }
+
+    function access() {
+      return get(/databases/$(database)/documents/hub_access/$(email())).data;
+    }
+
+    function activeMember() {
+      return isOwner() || isOfficialPilot() || (accessExists() && access().active == true);
+    }
+
+    function role() {
+      return isOwner() ? "head" : (isOfficialPilot() ? officialRole() : access().role);
+    }
+
+    function groups() {
+      return isOwner() ? ["3TR","KN","ATAS"] : (isOfficialPilot() ? officialGroups() : access().groups);
+    }
+
+    function isHead() {
+      return isOwner() || role() == "head";
+    }
+
+    function isLead() {
+      return role() in ["lead3tr","leadkn","leadknnight","leadatas"];
+    }
+
+    function deskUnit(d) {
+      return d.currentDesk == "R&D" ? "RD" :
+             d.currentDesk == "Khối Văn phòng / HCNS" ? "HCNS" :
+             d.currentDesk == "Khối Văn phòng / Kế toán" ? "KT" :
+             d.currentDesk == "Khối Văn phòng / Lấy mẫu - Kho" ? "KHO" :
+             d.currentDesk == "Quản lý chất lượng" ? "QLCL" :
+             d.currentDesk == "Ban Giám đốc" ? "BGD" :
+             "PTN";
+    }
+
+    function canReadCaseData(d) {
+      return activeMember() && (
+        role() in ["head","bod","coord","testeng"] ||
+        ((role() in ["lead3tr","leadkn","leadknnight","leadatas","ktv3tr","ktvkn","ktvatas"]) && d.sourceGroup in groups()) ||
+        (role() == "rnd" && d.currentDesk == "R&D" && hasUnit("RD")) ||
+        (role() in ["office","hr"] &&
+          d.currentDesk in ["Khối Văn phòng / HCNS","Khối Văn phòng / Kế toán","Khối Văn phòng / Lấy mẫu - Kho"] &&
+          hasUnit(deskUnit(d))) ||
+        (role() == "quality" && d.currentDesk == "Quản lý chất lượng" && hasUnit("QLCL"))
+      );
+    }
+
+    // Quyền xem "cách xử lý nội bộ" hẹp hơn quyền theo dõi case.
+    // Lead/KTV của nhóm nguồn vẫn theo dõi case nhưng không mặc định thấy ghi chú xử lý nội bộ.
+    function canReadPrivateHandling(d) {
+      return activeMember() && (
+        role() in ["head","bod","coord","testeng"] ||
+        (role() == "rnd" && d.currentDesk == "R&D" && hasUnit("RD")) ||
+        (role() in ["office","hr"] &&
+          d.currentDesk in ["Khối Văn phòng / HCNS","Khối Văn phòng / Kế toán","Khối Văn phòng / Lấy mẫu - Kho"] &&
+          hasUnit(deskUnit(d))) ||
+        (role() == "quality" && d.currentDesk == "Quản lý chất lượng" && hasUnit("QLCL"))
+      );
+    }
+
+    function leadEscalation() {
+      return isLead() &&
+        resource.data.sourceGroup in groups() &&
+        request.resource.data.status == "Chờ Trưởng phòng" &&
+        request.resource.data.currentDesk == "Trưởng phòng PTN" &&
+        request.resource.data.diff(resource.data).changedKeys()
+          .hasOnly(["status","currentDesk","updatedAt","updatedByEmail"]);
+    }
+
+    function receiverAck() {
+      return (
+        (role() == "rnd" && resource.data.currentDesk == "R&D" && hasUnit("RD")) ||
+        (role() in ["office","hr"] &&
+          resource.data.currentDesk in ["Khối Văn phòng / HCNS","Khối Văn phòng / Kế toán","Khối Văn phòng / Lấy mẫu - Kho"] &&
+          hasUnit(deskUnit(resource.data))) ||
+        (role() == "quality" && resource.data.currentDesk == "Quản lý chất lượng" && hasUnit("QLCL")) ||
+        (role() == "bod" && resource.data.currentDesk == "Ban Giám đốc")
+      ) &&
+      request.resource.data.diff(resource.data).changedKeys()
+        .hasOnly(["status","updatedAt","updatedByEmail"]);
+    }
+
+    match /hub_access/{emailId} {
+      allow read: if isOwner() || (signedIn() && emailId == email()) || (isOfficialPilot() && emailId == email());
+      allow create, update, delete: if isOwner();
+    }
+
+    match /hub_meta/counters {
+      allow read: if activeMember();
+      allow create: if activeMember() &&
+        request.resource.data.caseCounter == 1;
+      allow update: if activeMember() &&
+        request.resource.data.caseCounter == resource.data.caseCounter + 1 &&
+        request.resource.data.diff(resource.data).changedKeys()
+          .hasOnly(["caseCounter","updatedAt"]);
+      allow delete: if false;
+    }
+
+    match /hub_cases/{caseId} {
+      allow read: if canReadCaseData(resource.data);
+
+      allow create: if activeMember() &&
+        request.resource.data.createdByUid == request.auth.uid &&
+        request.resource.data.reportedByEmail == email() &&
+        (
+          isHead() ||
+          role() in ["bod","coord","testeng"] ||
+          (request.resource.data.sourceGroup in groups())
+        );
+
+      allow update: if isHead() || leadEscalation() || receiverAck();
+      allow delete: if false;
+
+      match /private_notes/{noteId} {
+        allow read: if canReadPrivateHandling(
+          get(/databases/$(database)/documents/hub_cases/$(caseId)).data
+        );
+
+        allow create: if canReadPrivateHandling(
+            get(/databases/$(database)/documents/hub_cases/$(caseId)).data
+          ) &&
+          request.resource.data.authorUid == request.auth.uid &&
+          request.resource.data.authorEmail == email();
+
+        allow update, delete: if false;
+      }
+    }
+
+    match /hub_case_events/{eventId} {
+      allow read: if activeMember() &&
+        canReadCaseData(
+          get(/databases/$(database)/documents/hub_cases/$(resource.data.caseId)).data
+        );
+
+      allow create: if activeMember() &&
+        request.resource.data.actorUid == request.auth.uid &&
+        request.resource.data.actorEmail == email() &&
+        canReadCaseData(
+          get(/databases/$(database)/documents/hub_cases/$(request.resource.data.caseId)).data
+        );
+
+      allow update, delete: if false;
+    }
+
+    match /hub_comments/{commentId} {
+      allow read: if activeMember() &&
+        canReadCaseData(
+          get(/databases/$(database)/documents/hub_cases/$(resource.data.caseId)).data
+        );
+      allow create: if activeMember() &&
+        request.resource.data.authorUid == request.auth.uid &&
+        request.resource.data.authorEmail == email() &&
+        canReadCaseData(
+          get(/databases/$(database)/documents/hub_cases/$(request.resource.data.caseId)).data
+        );
+      allow update, delete: if false;
+    }
+
+    match /hub_pins/{pinId} {
+      allow read: if signedIn() && resource.data.userUid == request.auth.uid;
+      allow create: if signedIn() &&
+        request.resource.data.userUid == request.auth.uid &&
+        request.resource.data.userEmail == email();
+      allow update: if signedIn() &&
+        resource.data.userUid == request.auth.uid &&
+        request.resource.data.userUid == request.auth.uid &&
+        request.resource.data.userEmail == resource.data.userEmail;
+      allow delete: if signedIn() && resource.data.userUid == request.auth.uid;
+    }
+
+
+    match /hub_meal_reports/{reportId} {
+      allow read: if activeMember() && (
+        isOwner() ||
+        role() in ["bod","coord"] ||
+        resource.data.userUid == request.auth.uid ||
+        (role() in ["office","hr"] && resource.data.unitCode is string && hasUnit(resource.data.unitCode))
+      );
+
+      allow create: if activeMember() &&
+        request.resource.data.userUid == request.auth.uid &&
+        request.resource.data.userEmail == email() &&
+        request.resource.data.unitCode is string &&
+        hasUnit(request.resource.data.unitCode) &&
+        !exists(/databases/$(database)/documents/hub_meal_department_reports/$(request.resource.data.date + "_" + request.resource.data.unitCode));
+
+      allow update: if activeMember() &&
+        resource.data.userUid == request.auth.uid &&
+        request.resource.data.userUid == request.auth.uid &&
+        request.resource.data.userEmail == email() &&
+        request.resource.data.unitCode is string &&
+        hasUnit(request.resource.data.unitCode) &&
+        !exists(/databases/$(database)/documents/hub_meal_department_reports/$(request.resource.data.date + "_" + request.resource.data.unitCode));
+
+      allow delete: if false;
+    }
+
+    match /hub_meal_public_status/{reportId} {
+      allow read: if activeMember();
+
+      allow create, update: if activeMember() &&
+        request.resource.data.userUid == request.auth.uid &&
+        request.resource.data.unitCode is string &&
+        hasUnit(request.resource.data.unitCode) &&
+        request.resource.data.choice in ["Có ăn","Không ăn"] &&
+        request.resource.data.keys().hasOnly(["date","unitCode","choice","userUid","updatedAt"]);
+
+      allow delete: if false;
+    }
+
+    match /hub_meal_department_reports/{reportId} {
+      allow read: if activeMember();
+      allow create: if activeMember() &&
+        (hasPermission("meal.unit.manage") || role() in ["head","lead3tr","leadkn","leadknnight","leadatas","coord"]) &&
+        request.resource.data.unitCode is string &&
+        hasUnit(request.resource.data.unitCode) &&
+        reportId == request.resource.data.date + "_" + request.resource.data.unitCode;
+
+      allow update: if activeMember() &&
+        (hasPermission("meal.unit.manage") || role() in ["head","lead3tr","leadkn","leadknnight","leadatas","coord"]) &&
+        resource.data.unitCode == request.resource.data.unitCode &&
+        resource.data.date == request.resource.data.date &&
+        hasUnit(request.resource.data.unitCode) &&
+        reportId == request.resource.data.date + "_" + request.resource.data.unitCode;
+      allow delete: if false;
+    }
+
+    match /hub_meal_guest_reports/{reportId} {
+      allow read: if activeMember() && (isOwner() || role() in ["head","bod","coord","office","hr"] || resource.data.reportedByUid == request.auth.uid);
+      allow create: if activeMember() &&
+        request.resource.data.reportedByUid == request.auth.uid &&
+        request.resource.data.reportedByEmail == email() &&
+        request.resource.data.unitCode is string &&
+        hasUnit(request.resource.data.unitCode) &&
+        (hasPermission("meal.guest.create") || role() in ["head","lead3tr","leadkn","leadknnight","leadatas","coord","office","hr","quality","bod"]);
+      allow update, delete: if false;
+    }
+
+    match /hub_quality_handoffs/{handoffId} {
+      allow read: if activeMember() &&
+        role() in ["head","bod","quality","testeng","coord"];
+
+      allow create: if isHead() &&
+        request.resource.data.createdByUid == request.auth.uid &&
+        request.resource.data.createdByEmail == email();
+
+      allow update: if activeMember() &&
+        role() in ["head","quality"] &&
+        request.resource.data.diff(resource.data).changedKeys()
+          .hasOnly(["status","receivedAt","updatedAt","updatedByEmail","qualityNote"]);
+
+      allow delete: if false;
+    }
+
+    match /hub_audit_logs/{auditId} {
+      allow read: if isHead() || role() == "bod";
+      allow create: if activeMember() &&
+        request.resource.data.actorUid == request.auth.uid &&
+        request.resource.data.actorEmail == email();
+      allow update, delete: if false;
+    }
+
+    // Project cũ đã ngừng ứng dụng: dữ liệu cũ không mở cho user HUB.
+    // Chủ sở hữu vẫn có thể truy cập từ client nếu cần.
+    match /{document=**} {
+      allow read, write: if isOwner();
+    }
+  }
+}

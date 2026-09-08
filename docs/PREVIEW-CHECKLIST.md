@@ -15,7 +15,7 @@ Trạng thái ban đầu: **CHƯA NGHIỆM THU**. Ghi commit từ `build-info.js
 | Chat lịch sử | Tin V2.2.2/V2.2.3 còn đọc được khi Rules cho phép | Chưa test Preview |
 | Xác nhận PTN | Hoàn thành/làm bổ sung đúng trạng thái; giữ dấu phối hợp RD | Chưa test Preview |
 | R&D mở rộng | Chỉ tài khoản có permission đọc tổng quan công khai PTN | Chưa test Preview |
-| Private handling | Đọc trực tiếp bằng SDK với tài khoản sai bộ phận bị Rules từ chối; không có dữ liệu riêng trong public document | Chưa có Rules để test |
+| Private handling | Đọc trực tiếp bằng SDK với tài khoản sai bộ phận bị Rules từ chối; không có dữ liệu riêng trong public document | Đã có Rules; chờ nghiệm thu dữ liệu/môi trường test |
 | Đăng xuất/đổi tài khoản | Không còn listener, nội dung VM/chat hoặc cache của tài khoản trước | Chưa test Preview |
 
 Chỉ khi tất cả đạt mới đề xuất phát hành production riêng. Không triển khai Rules vào project dùng chung để thử một cách tự động.

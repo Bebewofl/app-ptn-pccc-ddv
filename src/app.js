@@ -572,7 +572,9 @@ async function loadPrivateHandling(caseId){
  }
  box.className='private-zone';
  try{
-   const snap=await db.collection('hub_cases').doc(caseId).collection('private_notes').get();
+   let query=db.collection('hub_cases').doc(caseId).collection('private_notes');
+   if(!['head','bod','coord','testeng'].includes(R().type))query=query.where('unitCode','==',caseUnitCode({currentDesk:c.currentDesk}));
+   const snap=await query.get();
    const notes=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>{
      const ta=a.createdAt?.toMillis?.()||0, tb=b.createdAt?.toMillis?.()||0;
      return ta-tb;
@@ -590,9 +592,11 @@ function openAddPrivateNote(caseId){
  addPrivateNote(caseId,text.trim());
 }
 async function addPrivateNote(caseId,text){
+ const c=hubCases.find(x=>x.id===caseId);if(!canSeePrivateHandling(c))return;
  try{
    await db.collection('hub_cases').doc(caseId).collection('private_notes').add({
      text,
+     unitCode:caseUnitCode({currentDesk:c.currentDesk}),
      authorUid:currentUser.uid,
      authorEmail:emailKey(currentUser.email),
      authorName:currentUser.displayName||currentUser.email,

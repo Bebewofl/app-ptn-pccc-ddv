@@ -21,7 +21,7 @@ function harness(){
     document:{getElementById:element,querySelectorAll:()=>[],addEventListener(){},createElement:()=>({})},
     FV:{serverTimestamp:()=>123},
     db:{collection(name){return {
-      where(field,op,value){return {get:async()=>({docs:[],empty:true}),onSnapshot(cb,err){const l={name,field,value,cb,err,stopped:false};listeners.push(l);return()=>l.stopped=true}}},
+      where(field,op,value){const q={where(nextField,nextOp,nextValue){q.thread=nextValue;return q},get:async()=>({docs:[],empty:true}),onSnapshot(cb,err){const l={name,field,value,thread:q.thread,cb,err,stopped:false};listeners.push(l);return()=>l.stopped=true}};return q},
       async add(data){writes.push({name,data})},doc(id){return {async set(data){writes.push({name,id,data})},async update(data){writes.push({name,id,data})}}}
     }}}
   });ctx.window=ctx;
@@ -56,7 +56,7 @@ test('audit uses only caseId, sorts locally, and escapes content',async()=>{
 });
 
 test('R&D response preserves author compatibility, attachment and link payloads',async()=>{
-  const h=harness();h.load(inter);h.ctx.R=()=>({type:'rnd'});
+  const h=harness();h.load(inter);h.ctx.R=()=>({type:'rnd'});h.ctx.currentAccess.permissions=['rnd.response.manage'];
   h.ctx.hubCases=[{id:'VM-011',currentUnitCode:'RD'}];
   h.ctx.FileReader=class{readAsDataURL(){this.result='data:text/plain;base64,aGk=';this.onload()}};
   h.element('v22Desc_VM-011').value='Kết quả thử';
@@ -118,4 +118,15 @@ test('complete application loads modules before auth and renders PTN/R&D without
   h.load("currentUser={uid:'ptn',email:'ptn@example.com'};currentAccess={role:'head',spaces:['ptn','rnd'],permissions:[]};hubCases=[{id:'VM-011',title:'Demo',sourceGroup:'3TR',currentUnitCode:'RD',currentDesk:'R&D',status:'Đang xử lý'}];");
   assert.match(vm.runInContext("render('rnd')",h.ctx),/v222ChatPanel/);
   assert.match(vm.runInContext("render('ptn')",h.ctx),/VM-011/);
+});
+
+test('private handling queries the current department and writes an explicit unit tag',async()=>{
+  const h=harness();let filter,saved;
+  h.ctx.R=()=>({type:'rnd',label:'R&D'});h.ctx.hubCases=[{id:'VM-011',currentDesk:'R&D'}];
+  h.ctx.canSeePrivateHandling=()=>true;h.ctx.emailKey=x=>x;h.ctx.escapeHtml=String;h.ctx.fmtTs=()=>'';
+  h.load(functionSource('caseUnitCode'));
+  h.ctx.db={collection:()=>({doc:()=>({collection:()=>({where(...args){filter=args;return {get:async()=>({docs:[]})}},add:async data=>saved=data})})})};
+  h.load(functionSource('loadPrivateHandling'));h.load(functionSource('addPrivateNote'));
+  await h.ctx.loadPrivateHandling('VM-011');assert.deepEqual(filter,['unitCode','==','RD']);
+  await h.ctx.addPrivateNote('VM-011','Private RD note');assert.equal(saved.unitCode,'RD');assert.equal(saved.text,'Private RD note');
 });

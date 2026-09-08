@@ -1,3 +1,4 @@
 * text=auto eol=lf
 baseline/v211/** -text whitespace=-blank-at-eol,-blank-at-eof
 *.png binary
+rules/production-received-2026-09-08.rules -text

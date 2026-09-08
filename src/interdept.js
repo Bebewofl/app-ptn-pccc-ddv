@@ -19,7 +19,7 @@
     try{if(typeof hasPermission==='function'&&hasPermission(p))return true}catch(e){}
     try{return Array.isArray(currentAccess?.permissions)&&currentAccess.permissions.includes(p)}catch(e){return false}
   }
-  function isRndHead(){return role()==='rnd'&&hasPerm('rnd.tech.overview')}
+  function isRndHead(){return role()==='rnd'&&accessUnits().includes('RD')&&hasPerm('rnd.tech.overview')}
   function cases(){try{return Array.isArray(hubCases)?hubCases:[]}catch(e){return []}}
   function visible(){
     try{if(typeof visibleCases==='function')return visibleCases()}catch(e){}
@@ -183,7 +183,7 @@
   function safeId(id){return String(id||'').replace(/[^a-zA-Z0-9_-]/g,'_')}
   function canRespond(c){
     const cur=currentUnit(c),src=sourceUnit(c),r=role();
-    if(r==='rnd')return cur==='RD';
+    if(r==='rnd')return cur==='RD'&&hasPerm('rnd.response.manage');
     if(r==='quality')return cur==='QLCL';
     if(r==='bod')return cur==='BGD';
     if(r==='office'||r==='hr'){try{return accessUnits().includes(cur)}catch(e){return ['HCNS','KT','KHO'].includes(cur)}}

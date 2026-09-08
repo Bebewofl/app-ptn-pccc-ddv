@@ -21,10 +21,10 @@ Quyền tổng quan R&D dùng permission `rnd.tech.overview`, bỏ ngoại lệ 
 
 ## Chưa thể xác nhận
 
-Repo không chứa Rules đang triển khai. Rules V2.2.4 trong builder cũ chỉ là đoạn chèn, phụ thuộc file Rules từ ZIP V2.1.1 chưa có ở đây. Không ghép đoạn đó thành một bộ Rules đoán, không triển khai Rules.
+Ngày 08/09/2026, người dùng đã cung cấp Rules hiện hành. Nguyên bản nằm tại `rules/production-received-2026-09-08.rules`; bản sửa để kiểm thử nằm tại `rules/firestore.candidate.rules`. Không triển khai Rules. Xem [rà soát Rules](RULES-REVIEW.md).
 
-Trước khi công nhận Preview đạt cần lấy bản Rules thực tế từ Firebase hoặc bản gốc đã lưu, kiểm tra bằng emulator và hai tài khoản đúng vai trò. Đặc biệt phải chứng minh yêu cầu đọc trực tiếp `private_notes` bị từ chối khi không thuộc quyền; kiểm tra UI không đủ chứng minh điều này. Cần đối chiếu cả các trường nhạy cảm trong `hub_cases`: Firestore không tự che từng trường khi đã cho đọc document.
+Trước khi công nhận Preview đạt cần kiểm tra bằng emulator và hai tài khoản đúng vai trò trên môi trường test. Cần đối chiếu cả các trường nhạy cảm trong `hub_cases`: Firestore không tự che từng trường khi đã cho đọc document. Việc có các trường riêng tư trong dữ liệu thật chưa được kiểm tra.
 
-Các bài test hiện tại dùng Firebase/DOM giả lập để kiểm tra logic client; không thay thế kiểm thử Firestore thật, file ảnh lớn trên trình duyệt và đồng bộ hai phiên đăng nhập.
+Các bài test client dùng Firebase/DOM giả lập. Bộ `npm run test:rules` bổ sung kiểm thử Rules bằng Firestore Emulator, gồm hai client realtime độc lập. Các bài này không thay thế nghiệm thu bằng trình duyệt và tài khoản thực tế trên môi trường test.
 
 Production được giữ nguyên. Không có workflow xuất Production hoặc Rules hoạt động trong develop. Các workflow cũ trên main chưa sửa theo yêu cầu giữ main an toàn; không chạy chúng để phát hành bản hợp nhất.

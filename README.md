@@ -20,8 +20,11 @@ Không dùng ZIP, Downloads, CMD/PS1 để tạo bản mới. Không dùng các 
 - `baseline/v211-manifest.json`: nguồn và SHA-256 của bản chụp.
 - `archive/v224-v225/`: bản cũ lưu dạng văn bản để đối chiếu; không chạy và không đưa lên Hosting.
 - `npm run check`: kiểm tra cú pháp, kiểm thử hồi quy và tạo `dist/` hoàn toàn từ file trong repo, không tải production.
+- `npm ci` rồi `npm run test:rules`: kiểm thử Rules bằng Firestore Emulator (Java 21), project `demo-*`, không dùng dữ liệu thật. GitHub tự chạy bước này trước Preview.
 - `dist/build-info.json`: phiên bản, commit nguồn và mã kiểm tra nội dung nguồn.
 
 Preview cần secret `FIREBASE_TOKEN` hiện dùng bởi workflow cũ. Không nhập token vào code/chat. Workflow này không triển khai Rules. Preview Hosting vẫn dùng Firebase project `app-ptn-pccc`, do đó đăng nhập và dữ liệu Firestore dùng chung với production; chỉ tạo VM test được thống nhất, không sửa VM nghiệp vụ thật.
 
 Chi tiết rà soát: [CONSOLIDATION.md](docs/CONSOLIDATION.md).
+
+Rules nhận từ người dùng và bản candidate được tách tại `rules/`. [Rà soát quyền và giới hạn triển khai](docs/RULES-REVIEW.md). Candidate thay đổi cách đọc private notes và truy vấn chat; Hosting và Rules phải được kiểm thử cùng nhau trên môi trường test. Workflow Hosting Preview không cập nhật Rules của Firebase project dùng chung.

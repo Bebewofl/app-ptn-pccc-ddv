@@ -129,8 +129,8 @@
     mainMessages=[];legacyMessages=[];legacyToken++;const token=legacyToken;const thread=activeThread;
     const target=document.getElementById('v222ChatMessages');if(target)target.innerHTML='<div class="v22-empty">Đang đồng bộ trao đổi...</div>';
     try{
-      // Single-field query only: no composite index. Both GENERAL and VM threads use the same collection.
-      unsubscribeMain=db.collection('hub_interdept_chat').where('spaceKey','==',SPACE_KEY).onSnapshot(snap=>{
+      // Equality filters only; thread scope is enforced by Rules, not just hidden in the UI.
+      unsubscribeMain=db.collection('hub_interdept_chat').where('spaceKey','==',SPACE_KEY).where('threadKey','==',thread).onSnapshot(snap=>{
         if(token!==legacyToken)return;
         mainMessages=snap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>String(x.threadKey||'')===thread);
         renderMessages();
