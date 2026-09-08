@@ -1,0 +1,26 @@
+name: "HUB - 0. Kiểm tra bản mới"
+on:
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [develop]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm run check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HUB-check-${{ github.sha }}
+          path: |
+            dist
+            VERSION.json
+            firebase.generated.json
+          retention-days: 14

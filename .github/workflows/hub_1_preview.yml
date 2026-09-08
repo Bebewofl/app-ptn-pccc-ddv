@@ -1,0 +1,39 @@
+name: "HUB - 1. Chạy Preview"
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: hub-develop-preview
+  cancel-in-progress: false
+jobs:
+  preview:
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm run check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HUB-preview-${{ github.sha }}
+          path: |
+            dist
+            VERSION.json
+            firebase.generated.json
+          retention-days: 30
+      - name: Kiểm tra cấu hình Firebase
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          if [ -z "$FIREBASE_TOKEN" ]; then
+            echo "::error::Thiếu FIREBASE_TOKEN; chưa deploy Preview."
+            exit 1
+          fi
+      - name: Hosting Preview only
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          npx --yes firebase-tools@14.15.2 hosting:channel:deploy hub-v225-candidate --expires 30d --project app-ptn-pccc --config firebase.generated.json --token "$FIREBASE_TOKEN" --non-interactive

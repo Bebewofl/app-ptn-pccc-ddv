@@ -1,0 +1,4 @@
+dist/
+firebase.generated.json
+node_modules/
+*.log

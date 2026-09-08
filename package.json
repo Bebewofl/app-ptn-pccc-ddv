@@ -1,0 +1,11 @@
+{
+  "name": "hub-ptn",
+  "version": "2.2.5",
+  "private": true,
+  "engines": {"node": ">=22"},
+  "scripts": {
+    "build": "node scripts/build-hub.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check": "node --check src/app.js && node --check src/interdept.js && node --check src/chat.js && npm test && npm run build"
+  }
+}

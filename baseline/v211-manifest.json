@@ -1,0 +1,14 @@
+{
+  "source": "https://app-ptn-pccc.web.app/",
+  "capturedAt": "2026-09-08T04:02:36.351Z",
+  "version": "2.1.1",
+  "note": "Public Hosting snapshot only; deployed Firestore Rules are not available from Hosting.",
+  "files": {
+    "__/firebase/init.js": "c07be7c154223423bea0784f5c401e95fe44de1379a542255354cce26260b10a",
+    "assets/favicon-16.png": "f3b250bdb6e1f942063191603bd7c8e994999a9a7ccf7e01437a5ffba4475c3e",
+    "assets/favicon-32.png": "1389e02ba38737f6cec59756f998c293fac2543bebc65b2795501d703245d84d",
+    "assets/icon-128.png": "4ac2de022198e2cdaa786808b8ffd6467d99ad17bf4e8eddc1b517f527cf5061",
+    "assets/icon-180.png": "904bb15454de7d801f446b676b067594e49af70658d48256c867124e7a16fa6b",
+    "index.html": "aa217e21163d3e17657890500240c1ed6712cde1b039e44a22c91e54859a37d0"
+  }
+}
