@@ -1,0 +1,73 @@
+name: "HUB - 2. Production V2.2.5 Stable-1"
+
+on:
+  push:
+    branches: [release-hub-v2.2.5-stable]
+    paths:
+      - PRODUCTION_DEPLOY_READY
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hub-production
+  cancel-in-progress: false
+
+jobs:
+  production:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Cài công cụ cố định theo package-lock
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Kiểm tra JavaScript, build và regression
+        run: npm run check
+
+      - name: Kiểm tra Firestore Rules bằng emulator
+        run: npm run test:rules
+
+      - name: Build bản Production có khóa an toàn
+        run: node scripts/build-production.mjs
+
+      - name: Kiểm tra quyền deploy
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          if [ -z "$FIREBASE_TOKEN" ]; then
+            echo "::error::Thiếu FIREBASE_TOKEN. Dừng trước khi thay đổi Production."
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HUB-V2.2.5-Stable-1-${{ github.sha }}
+          path: |
+            dist-production
+            VERSION.production.json
+            firebase.production.generated.json
+            rules/firestore.candidate.rules
+            rules/production-received-2026-09-08.rules
+          retention-days: 90
+
+      - name: Deploy Hosting + Firestore Rules Production
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: node scripts/deploy-production.mjs
+
+      - name: Kết quả
+        run: |
+          echo "## HUB V2.2.5 Stable-1 đã triển khai" >> "$GITHUB_STEP_SUMMARY"
+          echo "Production: https://app-ptn-pccc.web.app" >> "$GITHUB_STEP_SUMMARY"
+          echo "Baseline rollback: HUB V2.1.1 đã được lưu trong repository." >> "$GITHUB_STEP_SUMMARY"
