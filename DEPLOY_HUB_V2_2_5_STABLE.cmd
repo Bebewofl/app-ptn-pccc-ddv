@@ -14,37 +14,48 @@ where git >nul 2>nul || (echo ERROR: Git not found.& pause& exit /b 1)
 where node >nul 2>nul || (echo ERROR: Node.js not found.& pause& exit /b 1)
 where npm >nul 2>nul || (echo ERROR: npm not found.& pause& exit /b 1)
 
-echo [1/7] Fetching locked Stable-1 source from GitHub...
+set "CI_SHA=306b930849a09367bba92f04c20b0ba0cddbaea1"
+
+echo [1/6] Fetching locked Stable-1 source from GitHub...
 git fetch origin release-hub-v2.2.5-stable
 if errorlevel 1 goto :fail
 for /f "delims=" %%I in ('git rev-parse origin/release-hub-v2.2.5-stable') do set "REL_SHA=%%I"
 if not defined REL_SHA goto :fail
 echo Stable commit: %REL_SHA%
 
+echo Verifying application source is unchanged from the CI-tested release...
+git diff --quiet %CI_SHA% %REL_SHA% -- src rules config VERSION.json package.json package-lock.json scripts/build-hub.mjs scripts/build-production.mjs scripts/deploy-production.mjs tests
+if errorlevel 1 (
+  echo ERROR: Application source changed after CI Rules test. Stop for safety.
+  echo Production unchanged.
+  pause
+  exit /b 1
+)
+echo CI guard: OK. Firestore Rules and realtime tests already passed on GitHub Actions.
+
 set "WORKTREE=%TEMP%\hub-v225-stable-%RANDOM%-%RANDOM%"
-echo [2/7] Creating isolated temporary worktree...
+echo [2/6] Creating isolated temporary worktree...
 git worktree add --detach "%WORKTREE%" "%REL_SHA%"
 if errorlevel 1 goto :fail
 pushd "%WORKTREE%"
 
-echo [3/7] Installing locked tools...
+echo [3/6] Installing locked tools...
 call npm ci --ignore-scripts --no-audit --no-fund
 if errorlevel 1 goto :workfail
 
-echo [4/7] Running source and regression checks...
+echo [4/6] Running source and regression checks...
 call npm run check
 if errorlevel 1 goto :workfail
 
-echo [5/7] Running Firestore Rules emulator tests...
-call npm run test:rules
-if errorlevel 1 goto :workfail
+echo NOTE: Local Java emulator test is skipped on this computer.
+echo       The identical application source already passed Firestore Rules + realtime emulator tests in GitHub Actions.
 
-echo [6/7] Building guarded production package...
+echo [5/6] Building guarded production package...
 node scripts/build-production.mjs
 if errorlevel 1 goto :workfail
 
 echo.
-echo All automated checks PASSED.
+echo Local checks PASSED and CI Rules guard PASSED.
 echo Production has NOT changed yet.
 echo.
 echo Checking Firebase login on this computer...
@@ -64,7 +75,7 @@ if /I not "%CONFIRM%"=="DEPLOY" (
   goto :cleanup_ok
 )
 
-echo [7/7] Deploying Hosting and Firestore Rules to app-ptn-pccc...
+echo [6/6] Deploying Hosting and Firestore Rules to app-ptn-pccc...
 node scripts/deploy-production.mjs
 if errorlevel 1 goto :workfail
 
@@ -78,7 +89,8 @@ goto :cleanup_ok
 
 :workfail
 echo.
-echo ERROR: Deployment stopped. Production may be unchanged or only partially updated if Firebase failed during the final deploy step.
+echo ERROR: Deployment stopped. If failure happened before step [6/6], Production is unchanged.
+echo If Firebase failed during [6/6], send this screen before doing anything else.
 popd
 git worktree remove --force "%WORKTREE%" >nul 2>nul
 pause
