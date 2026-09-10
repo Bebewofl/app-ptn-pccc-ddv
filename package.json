@@ -12,8 +12,8 @@
     "check": "node --check src/app.js && node --check src/interdept.js && node --check src/chat.js && npm test && npm run build"
   },
   "devDependencies": {
-    "@firebase/rules-unit-testing": "4.0.1",
-    "firebase": "11.10.0",
-    "firebase-tools": "14.15.2"
+    "@firebase/rules-unit-testing": "5.0.2",
+    "firebase": "12.19.0",
+    "firebase-tools": "15.30.0"
   }
 }
