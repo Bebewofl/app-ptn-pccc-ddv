@@ -28,6 +28,12 @@ let html=await fs.readFile(path.join(dist,'index.html'),'utf8');
 if(!html.includes('{{HUB_DISPLAY}}'))throw Error('Missing version placeholder');
 const escaped=meta.display.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 html=html.replaceAll('{{HUB_DISPLAY}}',escaped).replace('<html lang="vi">',`<html lang="vi" data-hub-version="${meta.version}">`);
+if(await fs.access(path.join(dist,'operational-v226.css')).then(()=>true).catch(()=>false)){
+  html=html.replace('</head>','<link rel="stylesheet" href="operational-v226.css">\n</head>');
+}
+if(await fs.access(path.join(dist,'operational-v226.js')).then(()=>true).catch(()=>false)){
+  html=html.replace('</body>','<script src="operational-v226.js"></script>\n</body>');
+}
 html=html.replace('<body>','<body>\n<div style="position:fixed;bottom:0;left:0;right:0;z-index:99999;background:#fff3cd;color:#664d03;text-align:center;font:600 12px sans-serif;padding:6px;pointer-events:none">HUB PTN TEST · Chỉ dùng dữ liệu thử nghiệm</div>');
 await fs.writeFile(path.join(dist,'index.html'),html);
 await fs.writeFile(path.join(dist,'firebase-init.js'),`if(firebase.apps.length)throw Error('Unexpected Firebase app already initialized');\nfirebase.initializeApp(${JSON.stringify(firebaseConfig)});\n`);
