@@ -15,7 +15,7 @@ where git >nul 2>nul || (echo ERROR: Git not found.& pause& exit /b 1)
 where node >nul 2>nul || (echo ERROR: Node.js not found.& pause& exit /b 1)
 where npm >nul 2>nul || (echo ERROR: npm not found.& pause& exit /b 1)
 
-set "CI_SHA=6768aa551284e5f9423ce59d151cf788c4cfc719"
+set "CI_SHA=f3044e51dce42685d453721358e1b006dad66692"
 
 echo [1/6] Fetching locked clean V2.2.6 source from GitHub...
 git fetch origin release-hub-v2.2.6-clean
@@ -83,7 +83,7 @@ echo ============================================================
 echo DEPLOY SUCCESS - HUB V2.2.6 CLEAN
 echo Production: https://app-ptn-pccc.web.app
 echo ============================================================
-start "" "https://app-ptn-pccc.web.app/?cleanUi=1"
+start "" "https://app-ptn-pccc.web.app/?cleanUi=2"
 goto :cleanup_ok
 
 :workfail
