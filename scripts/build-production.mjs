@@ -37,7 +37,7 @@ await fs.cp(path.join(root,'src'),dist,{recursive:true});
 
 let html=await fs.readFile(path.join(dist,'index.html'),'utf8');
 if(!html.includes('{{HUB_DISPLAY}}'))throw Error('Missing version placeholder');
-const escaped=meta.display.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[c]));
+const escaped=meta.display.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 html=html.replaceAll('{{HUB_DISPLAY}}',escaped)
   .replace('<html lang="vi">',`<html lang="vi" data-hub-version="${meta.version}" data-hub-environment="production">`);
 
