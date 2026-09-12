@@ -1,0 +1,15 @@
+HUB V2.2.6 CLEAN RELEASE
+
+Mục tiêu:
+- Giữ nguyên toàn bộ chức năng V2.2.6 Stable-1.
+- Ẩn các dòng diễn giải nội bộ/test gây rối mắt trên giao diện production.
+- Không thay đổi phân quyền, Firestore Rules, chat, audit, báo cơm, SSO hoặc workflow liên phòng.
+- Dữ liệu test được xóa bằng RESET_HUB_TEST_DATA.cmd, tách riêng khỏi deploy giao diện.
+
+Dữ liệu được giữ khi reset:
+- hub_access
+- Firebase Authentication
+- Firestore Rules / cấu hình hệ thống
+
+Dữ liệu vận hành được xóa khi reset:
+- VM/case, audit, comment/phản hồi, chat liên phòng, pin, báo cơm test, handoff QLCL và counter.
