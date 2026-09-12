@@ -60,14 +60,16 @@ if /I not "%CONFIRM%"=="RESET" (
 echo.
 echo Deleting operational collections from app-ptn-pccc...
 for %%C in (hub_cases hub_case_events hub_comments hub_interdept_chat hub_pins hub_meal_reports hub_meal_public_status hub_meal_department_reports hub_meal_guest_reports hub_quality_handoffs hub_audit_logs) do (
+  set "CURRENT_DELETE=%%C"
   echo [DELETE] %%C
-  node "%FIREBASE%" firestore:delete "%%C" --recursive --yes --project app-ptn-pccc
-  if errorlevel 1 goto :fail
+  node "%FIREBASE%" firestore:delete "%%C" --recursive --force --project app-ptn-pccc
+  if errorlevel 1 goto :deletefail
 )
 
+set "CURRENT_DELETE=hub_meta/counters"
 echo [DELETE] hub_meta/counters
-node "%FIREBASE%" firestore:delete "hub_meta/counters" --yes --project app-ptn-pccc
-if errorlevel 1 goto :fail
+node "%FIREBASE%" firestore:delete "hub_meta/counters" --force --project app-ptn-pccc
+if errorlevel 1 goto :deletefail
 
 echo.
 echo ============================================================
@@ -79,9 +81,17 @@ start "" "https://app-ptn-pccc.web.app/?clean=1"
 pause
 exit /b 0
 
+:deletefail
+echo.
+echo ERROR: Reset stopped while deleting %CURRENT_DELETE%.
+echo Do not rerun an older copy of this script.
+echo Fetch/Pull the latest develop branch and send this screen if the error remains.
+pause
+exit /b 1
+
 :fail
 echo.
-echo ERROR: Reset stopped. Do not rerun blindly.
+echo ERROR: Reset stopped before deletion started.
 echo Send this screen before continuing.
 pause
 exit /b 1
