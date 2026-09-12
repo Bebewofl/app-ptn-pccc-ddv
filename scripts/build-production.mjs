@@ -47,8 +47,11 @@ if(await fs.access(path.join(dist,'operational-v226.css')).then(()=>true).catch(
 if(await fs.access(path.join(dist,'operational-v226.js')).then(()=>true).catch(()=>false)){
   html=html.replace('</body>','<script src="operational-v226.js"></script>\n</body>');
 }
+if(await fs.access(path.join(dist,'clean-ui.js')).then(()=>true).catch(()=>false)){
+  html=html.replace('</body>','<script src="clean-ui.js"></script>\n</body>');
+}
 if(/HUB PTN TEST|Chỉ dùng dữ liệu thử nghiệm/i.test(html))throw Error('Test banner/text detected in production HTML');
-if(!html.includes('operational-v226.css')||!html.includes('operational-v226.js'))throw Error('Operational V2.2.6 assets missing from production HTML');
+if(!html.includes('operational-v226.css')||!html.includes('operational-v226.js')||!html.includes('clean-ui.js'))throw Error('Required V2.2.6 production assets missing from production HTML');
 await fs.writeFile(path.join(dist,'index.html'),html);
 
 await fs.writeFile(path.join(dist,'firebase-init.js'),`if(firebase.apps.length)throw Error('Unexpected Firebase app already initialized');\nfirebase.initializeApp(${JSON.stringify(firebaseConfig)});\n`);
