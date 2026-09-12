@@ -23,6 +23,8 @@ function applyCleanUi(){
   const selectors = [
     '.notice',
     '.head p',
+    '.v22-page-head p',
+    '.v22-notice',
     '.op-form-note',
     '.follow-note',
     '.content > p',
