@@ -36,6 +36,9 @@ if(await fs.access(path.join(dist,'operational-v226.js')).then(()=>true).catch((
 if(await fs.access(path.join(dist,'clean-ui.js')).then(()=>true).catch(()=>false)){
   html=html.replace('</body>','<script src="clean-ui.js"></script>\n</body>');
 }
+if(await fs.access(path.join(dist,'access-v227.js')).then(()=>true).catch(()=>false)){
+  html=html.replace('</body>','<script src="access-v227.js"></script>\n</body>');
+}
 html=html.replace('<body>','<body>\n<div style="position:fixed;bottom:0;left:0;right:0;z-index:99999;background:#fff3cd;color:#664d03;text-align:center;font:600 12px sans-serif;padding:6px;pointer-events:none">HUB PTN TEST · Chỉ dùng dữ liệu thử nghiệm</div>');
 await fs.writeFile(path.join(dist,'index.html'),html);
 await fs.writeFile(path.join(dist,'firebase-init.js'),`if(firebase.apps.length)throw Error('Unexpected Firebase app already initialized');\nfirebase.initializeApp(${JSON.stringify(firebaseConfig)});\n`);
