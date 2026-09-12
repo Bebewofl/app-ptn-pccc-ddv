@@ -91,6 +91,98 @@ service cloud.firestore {
       return role() in ["lead3tr","leadkn","leadknnight","leadatas"];
     }
 
+    function ptnRosterGroup(targetEmail) {
+      return targetEmail == "bebewofl@gmail.com" ? "MANAGEMENT" :
+             targetEmail == "dowait17@gmail.com" ? "3TR" :
+             targetEmail == "vuong06042004@gmail.com" ? "3TR" :
+             targetEmail == "maicongtuan829@gmail.com" ? "3TR" :
+             targetEmail == "tuyent0319@gmail.com" ? "KN" :
+             targetEmail == "phanngoctuyen28022003@gmail.com" ? "KN" :
+             targetEmail == "binhduong04.dev@gmail.com" ? "KN" :
+             targetEmail == "phamduyhien2701206@gmail.com" ? "KN" :
+             targetEmail == "vivanthai230604@gmail.com" ? "KN" :
+             targetEmail == "phamductuan16091956@gmail.com" ? "KN" :
+             targetEmail == "nguyenanhtu7121941@gmail.com" ? "ATAS" :
+             targetEmail == "tdat52314@gmail.com" ? "ATAS" :
+             targetEmail == "anhminhcung@gmail.com" ? "ATAS" :
+             "";
+    }
+
+    function ptnRosterEmployeeId(targetEmail) {
+      return targetEmail == "bebewofl@gmail.com" ? "NS-001" :
+             targetEmail == "dowait17@gmail.com" ? "NS-002" :
+             targetEmail == "binhduong04.dev@gmail.com" ? "NS-003" :
+             targetEmail == "tuyent0319@gmail.com" ? "NS-004" :
+             targetEmail == "phanngoctuyen28022003@gmail.com" ? "NS-005" :
+             targetEmail == "vuong06042004@gmail.com" ? "NS-007" :
+             targetEmail == "tdat52314@gmail.com" ? "NS-008" :
+             targetEmail == "phamduyhien2701206@gmail.com" ? "NS-009" :
+             targetEmail == "maicongtuan829@gmail.com" ? "NS-010" :
+             targetEmail == "vivanthai230604@gmail.com" ? "NS-011" :
+             targetEmail == "phamductuan16091956@gmail.com" ? "NS-013" :
+             targetEmail == "anhminhcung@gmail.com" ? "NS-014" :
+             targetEmail == "nguyenanhtu7121941@gmail.com" ? "NS-016" :
+             "";
+    }
+
+    function isManagedKtvEmail(targetEmail) {
+      return targetEmail in [
+        "vuong06042004@gmail.com","maicongtuan829@gmail.com",
+        "binhduong04.dev@gmail.com","phamduyhien2701206@gmail.com","vivanthai230604@gmail.com","phamductuan16091956@gmail.com",
+        "tdat52314@gmail.com","anhminhcung@gmail.com"
+      ];
+    }
+
+    function expectedKtvRole(targetEmail) {
+      return ptnRosterGroup(targetEmail) == "3TR" ? "ktv3tr" :
+             ptnRosterGroup(targetEmail) == "KN" ? "ktvkn" :
+             ptnRosterGroup(targetEmail) == "ATAS" ? "ktvatas" : "";
+    }
+
+    function leadCanManageEmail(targetEmail) {
+      return activeMember() && isLead() && isManagedKtvEmail(targetEmail) && ptnRosterGroup(targetEmail) in groups();
+    }
+
+    function validLeadGrantedAccess(targetEmail,d) {
+      return leadCanManageEmail(targetEmail) &&
+        d.email == targetEmail &&
+        d.employeeId == ptnRosterEmployeeId(targetEmail) &&
+        d.role == expectedKtvRole(targetEmail) &&
+        d.groups == [ptnRosterGroup(targetEmail)] &&
+        d.spaces == ["ptn","common"] &&
+        d.unitCodes == ["PTN"] &&
+        d.permissions == [] &&
+        d.active == true &&
+        d.department == "PTN" &&
+        d.personnelTitle == "KTV" &&
+        d.grantedByEmail == email() &&
+        d.keys().hasOnly([
+          "email","name","employeeId","role","groups","spaces","unitCodes","permissions","active","department","personnelTitle",
+          "accessModelVersion","grantedByEmail","grantedByRole","createdAt","updatedAt","updatedByEmail"
+        ]);
+    }
+
+    function canReportPtnMealFor(targetEmail) {
+      return ptnRosterGroup(targetEmail) != "" && (
+        isHead() || targetEmail == email() || (isLead() && ptnRosterGroup(targetEmail) in groups())
+      );
+    }
+
+    function validPtnMeal(reportId,d) {
+      return d.unitCode == "PTN" &&
+        d.employeeEmail is string && ptnRosterGroup(d.employeeEmail) != "" &&
+        d.employeeId == ptnRosterEmployeeId(d.employeeEmail) &&
+        reportId == d.date + "_" + d.employeeId &&
+        canReportPtnMealFor(d.employeeEmail) &&
+        d.userUid == request.auth.uid && d.userEmail == email() &&
+        d.choice in ["Có ăn","Không ăn"];
+    }
+
+    function validPtnPublicMeal(reportId,d) {
+      return validPtnMeal(reportId,d) &&
+        d.keys().hasOnly(["date","unitCode","choice","employeeId","employeeName","employeeGroup","employeeEmail","userUid","userEmail","updatedAt"]);
+    }
+
     function deskUnit(d) {
       return d.currentDesk == "R&D" ? "RD" :
              d.currentDesk == "Khối Văn phòng / HCNS" ? "HCNS" :
@@ -116,8 +208,6 @@ service cloud.firestore {
       );
     }
 
-    // Quyền xem "cách xử lý nội bộ" hẹp hơn quyền theo dõi case.
-    // Lead/KTV của nhóm nguồn vẫn theo dõi case nhưng không mặc định thấy ghi chú xử lý nội bộ.
     function canReadPrivateHandling(d) {
       let r = role();
       let u = units();
@@ -157,8 +247,34 @@ service cloud.firestore {
     }
 
     match /hub_access/{emailId} {
-      allow read: if isOwner() || (signedIn() && emailId == email()) || (isOfficialPilot() && emailId == email());
-      allow create, update, delete: if isOwner();
+      allow read: if isOwner() || (signedIn() && emailId == email()) || (isOfficialPilot() && emailId == email()) || leadCanManageEmail(emailId);
+      allow create: if isOwner() || validLeadGrantedAccess(emailId,request.resource.data);
+      allow update: if isOwner() || (
+        leadCanManageEmail(emailId) &&
+        resource.data.email == emailId &&
+        resource.data.role == expectedKtvRole(emailId) &&
+        resource.data.groups == [ptnRosterGroup(emailId)] &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(["active","updatedAt","updatedByEmail"]) &&
+        request.resource.data.updatedByEmail == email()
+      );
+      allow delete: if isOwner();
+    }
+
+    match /hub_common_room_requests/{requestId} {
+      allow read: if isHead() || (signedIn() && resource.data.targetEmail == email()) || (isLead() && resource.data.groupCode in groups());
+      allow create: if activeMember() && isLead() &&
+        request.resource.data.targetEmail is string && leadCanManageEmail(request.resource.data.targetEmail) &&
+        request.resource.data.employeeId == ptnRosterEmployeeId(request.resource.data.targetEmail) &&
+        request.resource.data.groupCode == ptnRosterGroup(request.resource.data.targetEmail) &&
+        request.resource.data.requestedByUid == request.auth.uid &&
+        request.resource.data.requestedByEmail == email() &&
+        request.resource.data.status == "pending" &&
+        request.resource.data.keys().hasOnly(["targetEmail","targetName","employeeId","groupCode","requestedByUid","requestedByEmail","requestedByName","requestedByRole","status","createdAt","schemaVersion"]);
+      allow update: if isHead() &&
+        request.resource.data.status in ["approved","rejected"] &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status","decidedAt","decidedByEmail","decisionNote"]) &&
+        request.resource.data.decidedByEmail == email();
+      allow delete: if false;
     }
 
     match /hub_meta/counters {
@@ -188,7 +304,6 @@ service cloud.firestore {
       allow delete: if false;
 
       match /private_notes/{noteId} {
-        // Historical notes without unitCode stay available only to central management.
         allow read: if canReadPrivateHandling(
           get(/databases/$(database)/documents/hub_cases/$(caseId)).data
         ) && (role() in ["head","bod","coord","testeng"] ||
@@ -290,29 +405,35 @@ service cloud.firestore {
       allow delete: if signedIn() && resource.data.userUid == request.auth.uid;
     }
 
-
     match /hub_meal_reports/{reportId} {
       allow read: if activeMember() && (
         isOwner() ||
         role() in ["bod","coord"] ||
         resource.data.userUid == request.auth.uid ||
+        (resource.data.unitCode == "PTN" && resource.data.employeeEmail is string && canReportPtnMealFor(resource.data.employeeEmail)) ||
         (role() in ["office","hr"] && resource.data.unitCode is string && hasUnit(resource.data.unitCode))
       );
 
-      allow create: if activeMember() &&
-        request.resource.data.userUid == request.auth.uid &&
-        request.resource.data.userEmail == email() &&
-        request.resource.data.unitCode is string &&
-        hasUnit(request.resource.data.unitCode) &&
-        !exists(/databases/$(database)/documents/hub_meal_department_reports/$(request.resource.data.date + "_" + request.resource.data.unitCode));
+      allow create: if activeMember() && (
+        (request.resource.data.unitCode == "PTN" && validPtnMeal(reportId,request.resource.data)) ||
+        (request.resource.data.unitCode != "PTN" &&
+          request.resource.data.userUid == request.auth.uid &&
+          request.resource.data.userEmail == email() &&
+          request.resource.data.unitCode is string &&
+          hasUnit(request.resource.data.unitCode) &&
+          !exists(/databases/$(database)/documents/hub_meal_department_reports/$(request.resource.data.date + "_" + request.resource.data.unitCode)))
+      );
 
-      allow update: if activeMember() &&
-        resource.data.userUid == request.auth.uid &&
-        request.resource.data.userUid == request.auth.uid &&
-        request.resource.data.userEmail == email() &&
-        request.resource.data.unitCode is string &&
-        hasUnit(request.resource.data.unitCode) &&
-        !exists(/databases/$(database)/documents/hub_meal_department_reports/$(request.resource.data.date + "_" + request.resource.data.unitCode));
+      allow update: if activeMember() && (
+        (request.resource.data.unitCode == "PTN" && validPtnMeal(reportId,request.resource.data)) ||
+        (request.resource.data.unitCode != "PTN" &&
+          resource.data.userUid == request.auth.uid &&
+          request.resource.data.userUid == request.auth.uid &&
+          request.resource.data.userEmail == email() &&
+          request.resource.data.unitCode is string &&
+          hasUnit(request.resource.data.unitCode) &&
+          !exists(/databases/$(database)/documents/hub_meal_department_reports/$(request.resource.data.date + "_" + request.resource.data.unitCode)))
+      );
 
       allow delete: if false;
     }
@@ -320,12 +441,15 @@ service cloud.firestore {
     match /hub_meal_public_status/{reportId} {
       allow read: if activeMember();
 
-      allow create, update: if activeMember() &&
-        request.resource.data.userUid == request.auth.uid &&
-        request.resource.data.unitCode is string &&
-        hasUnit(request.resource.data.unitCode) &&
-        request.resource.data.choice in ["Có ăn","Không ăn"] &&
-        request.resource.data.keys().hasOnly(["date","unitCode","choice","userUid","updatedAt"]);
+      allow create, update: if activeMember() && (
+        (request.resource.data.unitCode == "PTN" && validPtnPublicMeal(reportId,request.resource.data)) ||
+        (request.resource.data.unitCode != "PTN" &&
+          request.resource.data.userUid == request.auth.uid &&
+          request.resource.data.unitCode is string &&
+          hasUnit(request.resource.data.unitCode) &&
+          request.resource.data.choice in ["Có ăn","Không ăn"] &&
+          request.resource.data.keys().hasOnly(["date","unitCode","choice","userUid","updatedAt"]))
+      );
 
       allow delete: if false;
     }
@@ -334,7 +458,7 @@ service cloud.firestore {
       allow read: if activeMember();
       allow create: if activeMember() &&
         (hasPermission("meal.unit.manage") || role() in ["head","lead3tr","leadkn","leadknnight","leadatas","coord"]) &&
-        request.resource.data.unitCode is string &&
+        request.resource.data.unitCode is string && request.resource.data.unitCode != "PTN" &&
         hasUnit(request.resource.data.unitCode) &&
         reportId == request.resource.data.date + "_" + request.resource.data.unitCode;
 
@@ -342,6 +466,7 @@ service cloud.firestore {
         (hasPermission("meal.unit.manage") || role() in ["head","lead3tr","leadkn","leadknnight","leadatas","coord"]) &&
         resource.data.unitCode == request.resource.data.unitCode &&
         resource.data.date == request.resource.data.date &&
+        request.resource.data.unitCode != "PTN" &&
         hasUnit(request.resource.data.unitCode) &&
         reportId == request.resource.data.date + "_" + request.resource.data.unitCode;
       allow delete: if false;
@@ -382,8 +507,6 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // Project cũ đã ngừng ứng dụng: dữ liệu cũ không mở cho user HUB.
-    // Chủ sở hữu vẫn có thể truy cập từ client nếu cần.
     match /{document=**} {
       allow read, write: if isOwner();
     }
