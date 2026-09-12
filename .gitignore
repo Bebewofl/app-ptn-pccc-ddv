@@ -1,5 +1,8 @@
 dist/
+dist-production/
+.firebase/
 firebase.generated.json
 firebase.test.generated.json
+firebase.production.generated.json
 node_modules/
 *.log
