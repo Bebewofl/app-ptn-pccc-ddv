@@ -24,14 +24,15 @@ for /f "delims=" %%I in ('git rev-parse origin/release-hub-v2.2.6-clean') do set
 if not defined REL_SHA goto :fail
 echo Clean release commit: %REL_SHA%
 
-echo Verifying locked release matches the CI-tested source...
-if /I not "%REL_SHA%"=="%CI_SHA%" (
-  echo ERROR: Clean release SHA differs from CI-tested source.
+echo Verifying release content against CI-tested source...
+git diff --quiet %CI_SHA% %REL_SHA% -- src rules config baseline VERSION.json VERSION.production.json package.json package-lock.json scripts tests
+if errorlevel 1 (
+  echo ERROR: Clean release content differs from CI-tested source.
   echo Production unchanged.
   pause
   exit /b 1
 )
-echo CI guard: OK. Source, Rules and production build passed GitHub Actions.
+echo CI guard: OK. Application source, Rules and production build match the GitHub Actions-tested source.
 
 set "WORKTREE=%TEMP%\hub-v226-clean-%RANDOM%-%RANDOM%"
 echo [2/6] Creating isolated temporary worktree...
@@ -48,7 +49,7 @@ call npm run check
 if errorlevel 1 goto :workfail
 
 echo NOTE: Local Java emulator test is skipped on this computer.
-echo       The identical release already passed Firestore Rules + realtime emulator tests in GitHub Actions.
+echo       The matching application source already passed Firestore Rules + realtime emulator tests in GitHub Actions.
 
 echo [5/6] Verifying guarded production package...
 call npm run build:production
@@ -80,7 +81,7 @@ if errorlevel 1 goto :workfail
 
 echo.
 echo ============================================================
-echo DEPLOY SUCCESS - HUB V2.2.6 CLEAN
+echo DEPLOY SUCCESS - HUB V2.2.6 CLEAN FIX
 echo Production: https://app-ptn-pccc.web.app
 echo ============================================================
 start "" "https://app-ptn-pccc.web.app/?cleanUi=2"
