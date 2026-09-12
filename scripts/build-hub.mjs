@@ -21,7 +21,6 @@ for(const file of (await fs.readdir(path.join(root,'src'),{recursive:true})).sor
 }
 const sourceHash=digest(JSON.stringify({meta,firebaseConfig,files}));
 const info={...meta,sourceCommit,sourceHash};
-// Fixed output child of this repository; build never downloads or rewrites its source.
 await fs.rm(dist,{recursive:true,force:true});
 await fs.cp(path.join(root,'src'),dist,{recursive:true});
 let html=await fs.readFile(path.join(dist,'index.html'),'utf8');
@@ -33,6 +32,9 @@ if(await fs.access(path.join(dist,'operational-v226.css')).then(()=>true).catch(
 }
 if(await fs.access(path.join(dist,'operational-v226.js')).then(()=>true).catch(()=>false)){
   html=html.replace('</body>','<script src="operational-v226.js"></script>\n</body>');
+}
+if(await fs.access(path.join(dist,'clean-ui.js')).then(()=>true).catch(()=>false)){
+  html=html.replace('</body>','<script src="clean-ui.js"></script>\n</body>');
 }
 html=html.replace('<body>','<body>\n<div style="position:fixed;bottom:0;left:0;right:0;z-index:99999;background:#fff3cd;color:#664d03;text-align:center;font:600 12px sans-serif;padding:6px;pointer-events:none">HUB PTN TEST · Chỉ dùng dữ liệu thử nghiệm</div>');
 await fs.writeFile(path.join(dist,'index.html'),html);
