@@ -1,8 +1,8 @@
 {
-  "version": "2.2.7",
-  "display": "Phiên bản V2.2.7 · Tạo bởi Dương Đức Vượng",
-  "baseline": "HUB V2.2.6 Clean production",
-  "previewChannel": "hub-v227-access-meal",
+  "version": "2.2.8",
+  "display": "Phiên bản V2.2.8 · Tạo bởi Dương Đức Vượng",
+  "baseline": "HUB V2.2.6 Clean production + V2.2.7 access/meal",
+  "previewChannel": "hub-v228-closed-loop-tasks",
   "projectId": "hub-ptn-test",
   "environment": "test"
 }
