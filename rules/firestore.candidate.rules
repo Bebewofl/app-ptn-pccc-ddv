@@ -316,6 +316,16 @@ service cloud.firestore {
         resource.data.groups == [ptnRosterGroup(emailId)] &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(["active","updatedAt","updatedByEmail"]) &&
         request.resource.data.updatedByEmail == email()
+      ) || (
+        isHead() &&
+        resource.data.active == true &&
+        request.resource.data.active == true &&
+        request.resource.data.spaces is list &&
+        "ptn" in request.resource.data.spaces &&
+        "common" in request.resource.data.spaces &&
+        "commonRoom" in request.resource.data.spaces &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(["spaces","updatedAt","updatedByEmail"]) &&
+        request.resource.data.updatedByEmail == email()
       );
       allow delete: if isOwner();
     }
