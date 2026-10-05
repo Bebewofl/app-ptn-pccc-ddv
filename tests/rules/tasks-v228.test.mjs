@@ -31,8 +31,8 @@ before(async()=>{
 after(async()=>env?.cleanup());
 
 test('head creates task only for approved PTN lead mapping',async()=>{
-  await assertSucceeds(setDoc(doc(owner(),'hub_tasks/CV-001'),{...taskBase,createdAt:serverTimestamp(),updatedAt:serverTimestamp(),updatedByEmail:'manager@example.com'}));
-  await assertFails(setDoc(doc(owner(),'hub_tasks/CV-002'),{...taskBase,code:'CV-002',assigneeEmail:'outsider@example.com',createdAt:serverTimestamp(),updatedAt:serverTimestamp(),updatedByEmail:'manager@example.com'}));
+  await assertSucceeds(setDoc(doc(manager(),'hub_tasks/CV-001'),{...taskBase,createdAt:serverTimestamp(),updatedAt:serverTimestamp(),updatedByEmail:'manager@example.com'}));
+  await assertFails(setDoc(doc(manager(),'hub_tasks/CV-002'),{...taskBase,code:'CV-002',assigneeEmail:'outsider@example.com',createdAt:serverTimestamp(),updatedAt:serverTimestamp(),updatedByEmail:'manager@example.com'}));
 });
 
 test('assigned lead sees only constrained own-task query',async()=>{
