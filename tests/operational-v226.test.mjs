@@ -36,6 +36,9 @@ test('canonical build loads operational module after core app without runtime mu
   assert.match(build,/operational-v226\.css/);
   assert.match(build,/operational-v226\.js/);
   assert.doesNotMatch(src,/MutationObserver/);
-  assert.equal(version.version,'2.2.6');
+  assert.equal(version.version,'2.2.8');
   assert.equal(version.environment,'test');
+  assert.match(build,/access-v227\\.js/);
+  assert.match(build,/task-v228\\.js/);
+  assert.match(build,/task-v228\\.css/);
 });
