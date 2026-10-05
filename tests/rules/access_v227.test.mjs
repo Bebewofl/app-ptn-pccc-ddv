@@ -7,6 +7,7 @@ if(process.env.FIRESTORE_EMULATOR_HOST!=='127.0.0.1:8085')throw Error('Tests req
 let env;
 const authDb=(uid,email)=>env.authenticatedContext(uid,{email}).firestore();
 const HEAD='bebewofl@gmail.com';
+const MANAGER='manager@example.com';
 const LEAD3='dowait17@gmail.com';
 const KTV3='vuong06042004@gmail.com';
 const KTV3B='maicongtuan829@gmail.com';
@@ -23,7 +24,12 @@ const access3=(target=KTV3,extra={})=>({
 before(async()=>{
   env=await initializeTestEnvironment({projectId:'demo-hub-v227',firestore:{host:'127.0.0.1',port:8085,rules:await fs.readFile('rules/firestore.candidate.rules','utf8')}});
 });
-beforeEach(async()=>{await env.clearFirestore()});
+beforeEach(async()=>{
+  await env.clearFirestore();
+  await env.withSecurityRulesDisabled(async ctx=>{
+    await setDoc(doc(ctx.firestore(),'hub_access',MANAGER),{active:true,role:'head',groups:['3TR','KN','ATAS'],unitCodes:['PTN'],permissions:[]});
+  });
+});
 after(async()=>{await env?.cleanup()});
 
 test('lead grants only active KTV in own group with fixed scope',async()=>{
@@ -44,13 +50,13 @@ test('lead may revoke/restore own KTV but cannot mutate role or spaces',async()=
 });
 
 test('common room requires leader request and head approval',async()=>{
-  const lead=authDb('lead3',LEAD3);const head=authDb('head',HEAD);
+  const lead=authDb('lead3',LEAD3);const head=authDb('manager',MANAGER);
   await assertSucceeds(setDoc(doc(lead,'hub_access',KTV3),access3()));
   const req={targetEmail:KTV3,targetName:'Trần Đức Vượng',employeeId:'NS-007',groupCode:'3TR',requestedByUid:'lead3',requestedByEmail:LEAD3,requestedByName:'Lê Đức Độ',requestedByRole:'Trưởng nhóm 3T-R',status:'pending',createdAt:new Date(),schemaVersion:'2.2.7'};
   await assertSucceeds(setDoc(doc(lead,'hub_common_room_requests','req1'),req));
   await assertFails(updateDoc(doc(lead,'hub_access',KTV3),{spaces:['ptn','common','commonRoom'],updatedAt:new Date(),updatedByEmail:LEAD3}));
-  await assertSucceeds(updateDoc(doc(head,'hub_access',KTV3),{spaces:['ptn','common','commonRoom'],updatedAt:new Date(),updatedByEmail:HEAD}));
-  await assertSucceeds(updateDoc(doc(head,'hub_common_room_requests','req1'),{status:'approved',decidedAt:new Date(),decidedByEmail:HEAD,decisionNote:'OK'}));
+  await assertSucceeds(updateDoc(doc(head,'hub_access',KTV3),{spaces:['ptn','common','commonRoom'],updatedAt:new Date(),updatedByEmail:MANAGER}));
+  await assertSucceeds(updateDoc(doc(head,'hub_common_room_requests','req1'),{status:'approved',decidedAt:new Date(),decidedByEmail:MANAGER,decisionNote:'OK'}));
   await assertSucceeds(getDoc(doc(authDb('ktv3',KTV3),'hub_access',KTV3)));
 });
 
@@ -61,11 +67,11 @@ const meal=(email,employeeId,group,uid,reporterEmail)=>({
 });
 
 test('PTN meal is individual by roster and group scope; collective PTN is blocked',async()=>{
-  const lead=authDb('lead3',LEAD3);const head=authDb('head',HEAD);
+  const lead=authDb('lead3',LEAD3);const head=authDb('manager',MANAGER);
   await assertSucceeds(setDoc(doc(lead,'hub_meal_reports','2026-09-13_NS-007'),meal(KTV3,'NS-007','3TR','lead3',LEAD3)));
   await assertFails(setDoc(doc(lead,'hub_meal_reports','2026-09-13_NS-003'),meal(KTVKN,'NS-003','KN','lead3',LEAD3)));
-  await assertSucceeds(setDoc(doc(head,'hub_meal_reports','2026-09-13_NS-003'),meal(KTVKN,'NS-003','KN','head',HEAD)));
-  await assertFails(setDoc(doc(head,'hub_meal_reports','2026-09-13_NS-006'),meal(RESIGNED,'NS-006','ATAS','head',HEAD)));
+  await assertSucceeds(setDoc(doc(head,'hub_meal_reports','2026-09-13_NS-003'),meal(KTVKN,'NS-003','KN','manager',MANAGER)));
+  await assertFails(setDoc(doc(head,'hub_meal_reports','2026-09-13_NS-006'),meal(RESIGNED,'NS-006','ATAS','manager',MANAGER)));
   await assertFails(setDoc(doc(lead,'hub_meal_department_reports','2026-09-13_PTN'),{date:'2026-09-13',unitCode:'PTN',count:8}));
 });
 
