@@ -41,6 +41,15 @@ jobs:
           node_modules/.bin/firebase emulators:exec --project demo-hub-lite --only auth,firestore,storage,functions,hosting --config firebase.lite.emulator.json --export-on-exit "$RUNNER_TEMP/hub-export" 'node scripts/lite-demo.mjs && node --test tests/pilot/api.test.mjs && python tests/pilot/browser.py && node tests/pilot/restore.mjs save pilot-evidence/fingerprint.json'
       - name: Restore into fresh emulators and compare
         run: node_modules/.bin/firebase emulators:exec --project demo-hub-lite --only auth,firestore,storage --config firebase.lite.emulator.json --import "$RUNNER_TEMP/hub-export" "node tests/pilot/restore.mjs verify pilot-evidence/fingerprint.json"
+      - name: Spark RTDB rules, pilot workflows and browsers
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          node scripts/build-lite.mjs spark
+          node scripts/build-lite.mjs spark-emulator
+          node_modules/.bin/firebase emulators:exec --only auth,database,hosting --project demo-hub-spark --config firebase.spark.emulator.json --export-on-exit "$RUNNER_TEMP/hub-spark-export" 'node tests/spark/pilot.mjs && python tests/spark/browser.py && node tests/spark/restore.mjs save'
+      - name: Restore Spark pilot into a clean Firebase instance
+        run: node_modules/.bin/firebase emulators:exec --only auth,database --project demo-hub-spark --config firebase.spark.emulator.json --import "$RUNNER_TEMP/hub-spark-export" 'node tests/spark/restore.mjs verify'
       - name: Save synthetic browser evidence
         if: always()
         uses: actions/upload-artifact@v4

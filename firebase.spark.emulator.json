@@ -1,0 +1,5 @@
+{
+ "database":{"rules":"rules/database.spark.json"},
+ "hosting":{"public":"dist-lite"},
+ "emulators":{"database":{"host":"127.0.0.1","port":9007},"hosting":{"host":"127.0.0.1","port":5017},"auth":{"host":"127.0.0.1","port":9097},"ui":{"enabled":false},"singleProjectMode":true}
+}

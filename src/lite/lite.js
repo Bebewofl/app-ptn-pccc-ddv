@@ -2,6 +2,7 @@ import {$,el,opt,button,choices,field,extra,date,late,nextAction,pages,statuses,
 import {reportForm,actionForm,chooseFiles} from './forms.js';
 import {adminPage} from './admin.js';
 const state={member:null,dir:[],cases:[],seen:{},page:'mine',metric:'',opened:null};
+let spark=null,sparkLocal=false;
 let auth,pilotRole='',local=false,epoch=0,view=0,seq=0,refreshing=null,previewUrls=[],detailRev=0,formOpen=false;
 const ctx={state,modal,api,refresh,open:openIssue,files:sendFiles,view:()=>view,error:e=>notice(e.message)};
 const name=id=>state.dir.find(d=>d.id===id)?.name||id||'Đã kết thúc';
@@ -14,6 +15,7 @@ function reset(){pilotRole='';$('pilotLabel').hidden=true;epoch++;seq++;refreshi
 async function api(route,body={}){
   const me=auth.currentUser,session=epoch;
   if(!me)throw Error('Cần đăng nhập.');
+  if(spark){const result=await spark(route,body,pilotRole);if(session!==epoch)throw Error('Phiên đăng nhập đã thay đổi.');return result;}
   const token=await me.getIdToken();if(session!==epoch)throw Error('Phiên đăng nhập đã thay đổi.');
   let res;
   try{res=await fetch('/api/'+route,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token,...(pilotRole?{'X-Hub-Pilot-Role':pilotRole}:{})},cache:'no-store',body:JSON.stringify(body)});}
@@ -116,22 +118,24 @@ async function sendFiles(code,list,ids){
 }
 function loginMethods(){
   const box=$('methods');box.replaceChildren();
-  if(local){const s=field(box,'Vai trò thực nghiệm','select','demoAccount');for(const [k,l] of Object.entries({ptn:'Trưởng phòng Thử nghiệm',pkt:'Trưởng phòng Kỹ thuật',engineer:'Kỹ sư trực',qlcl:'Trưởng phòng QLCL',director:'Giám đốc',office:'HCNS',sampling:'Lấy mẫu',warehouse:'Kho',lead:'Trưởng nhóm',staff:'Thử nghiệm viên',admin:'Quản trị kỹ thuật',accounts:'Quản trị tài khoản',viewer:'Người chỉ xem',operator:'Người nghiệm thu đa vai'}))opt(s,k,l);
+  if(local&&!sparkLocal){const s=field(box,'Vai trò thực nghiệm','select','demoAccount');for(const [k,l] of Object.entries({ptn:'Trưởng phòng Thử nghiệm',pkt:'Trưởng phòng Kỹ thuật',engineer:'Kỹ sư trực',qlcl:'Trưởng phòng QLCL',director:'Giám đốc',office:'HCNS',sampling:'Lấy mẫu',warehouse:'Kho',lead:'Trưởng nhóm',staff:'Thử nghiệm viên',admin:'Quản trị kỹ thuật',accounts:'Quản trị tài khoản',viewer:'Người chỉ xem',operator:'Người nghiệm thu đa vai'}))opt(s,k,l);
     box.append(button('Đăng nhập thử nghiệm',async()=>{try{const r=await fetch('/api/demo-login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role:s.value})});const d=await r.json();if(!r.ok)throw Error(d.error);await auth.signInWithCustomToken(d.token);}catch(e){ctx.error(e);}},true));
   }else{box.append(button('Đăng nhập bằng Google',()=>auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(()=>notice('Chưa đăng nhập được bằng Google. Kiểm tra tài khoản hoặc thử lại.')),true));}
 }
 async function start(){
   const build=await (await fetch('/build-info.json',{cache:'no-store'})).json(),host=location.hostname;
   local=build.mode==='emulator'&&['127.0.0.1','localhost'].includes(host)&&build.projectId==='demo-hub-lite';
-  const cloud=build.mode==='test'&&/^hub-ptn-test--hub-v3-lite-[a-z0-9-]+\.(web\.app|firebaseapp\.com)$/.test(host)&&location.protocol==='https:'&&build.projectId==='hub-ptn-test';
-  if(!local&&!cloud)throw Error('Địa chỉ này chưa được cấu hình cho HUB thực nghiệm.');
-  const cfg=local?{projectId:'demo-hub-lite',apiKey:'demo-key',authDomain:'demo-hub-lite.firebaseapp.com'}:await(await fetch('/__/firebase/init.json',{cache:'no-store'})).json();
-  if(cfg.projectId!==build.projectId||(!local&&cfg.authDomain!=='hub-ptn-test.firebaseapp.com'))throw Error('Cấu hình đăng nhập không thuộc môi trường Test.');
-  firebase.initializeApp(cfg);auth=firebase.auth();if(local)auth.useEmulator('http://127.0.0.1:9097',{disableWarnings:true});
-  $('env').textContent=(local?'Thực nghiệm nội bộ trên máy':'Firebase Test trực tuyến')+' · V3.0 LITE · Candidate 02';loginMethods();
-  auth.onAuthStateChanged(async u=>{reset();$('login').hidden=!!u;if(!u)return;try{const who=await api('session');if(auth.currentUser?.uid!==u.uid)return;
-      if(who.roles.length){choices($('pilotRole'),who.roles.map(r=>[r.uid,r.unit+' · '+r.name]));pilotRole=who.roles[0].uid;$('pilotLabel').hidden=false;}
-      await refresh();const code=new URL(location.href).searchParams.get('case');if(code&&state.member)await openIssue(code);}catch(e){ctx.error(e);}});
+  sparkLocal=build.mode==='spark-emulator'&&['127.0.0.1','localhost'].includes(host)&&build.projectId==='demo-hub-spark';
+  const cloud=['test','spark'].includes(build.mode)&&/^hub-ptn-test--hub-v3-lite-[a-z0-9-]+\.(web\.app|firebaseapp\.com)$/.test(host)&&location.protocol==='https:'&&build.projectId==='hub-ptn-test';
+  if(!local&&!cloud&&!sparkLocal)throw Error('Địa chỉ này chưa được cấu hình cho HUB thực nghiệm.');
+  const cfg=(local||sparkLocal)?{projectId:build.projectId,apiKey:'demo-key',authDomain:build.projectId+'.firebaseapp.com'}:await(await fetch('/__/firebase/init.json',{cache:'no-store'})).json();
+  if(cfg.projectId!==build.projectId||(!local&&!sparkLocal&&cfg.authDomain!=='hub-ptn-test.firebaseapp.com'))throw Error('Cấu hình đăng nhập không thuộc môi trường Test.');
+  firebase.initializeApp(cfg);auth=firebase.auth();if(local||sparkLocal)auth.useEmulator('http://127.0.0.1:9097',{disableWarnings:true});
+  if(build.mode==='spark'||sparkLocal){const {sparkApi,restDb}=await import('./spark.js');spark=sparkApi(restDb(sparkLocal?'http://127.0.0.1:9007':'https://hub-ptn-test-default-rtdb.asia-southeast1.firebasedatabase.app',auth,sparkLocal?'demo-hub-spark-default-rtdb':''),auth);}
+  $('env').textContent=(local||sparkLocal?'Thực nghiệm nội bộ trên máy':'Firebase Test trực tuyến')+(spark?' · V3.0 LITE · Spark':' · V3.0 LITE · Candidate 02');loginMethods();
+  auth.onAuthStateChanged(async u=>{reset();$('login').hidden=!!u;if(!u){loginMethods();return;}try{const who=await api('session');if(auth.currentUser?.uid!==u.uid)return;
+      if(who.roles.length){choices($('pilotRole'),who.roles.map(r=>[r.uid,r.unit+' · '+r.name]));pilotRole=who.roles.find(r=>r.uid==='pilot-ptn')?.uid||who.roles[0].uid;$('pilotRole').value=pilotRole;$('pilotLabel').hidden=false;}
+      await refresh();const code=new URL(location.href).searchParams.get('case');if(code&&state.member)await openIssue(code);}catch(e){if(u&&auth.currentUser?.uid===u.uid){$('login').hidden=false;const b=button('Đăng xuất',()=>auth.signOut());$('methods').replaceChildren(b);}ctx.error(e);}});
 }
 $('closeModal').onclick=()=>closeModal();$('modal').addEventListener('cancel',e=>{e.preventDefault();closeModal();});
 $('pilotRole').onchange=async()=>{const selection=$('pilotRole').value;epoch++;seq++;closeModal();state.member=null;state.cases=[];state.seen={};$('list').replaceChildren();$('metrics').replaceChildren();$('workspace').hidden=true;state.page='mine';pilotRole=selection;try{await refresh();}catch(e){ctx.error(e);}};

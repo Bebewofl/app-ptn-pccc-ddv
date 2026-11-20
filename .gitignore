@@ -9,3 +9,4 @@ node_modules/
 
 dist-lite/
 pilot-evidence/
+rules/database.spark.json
