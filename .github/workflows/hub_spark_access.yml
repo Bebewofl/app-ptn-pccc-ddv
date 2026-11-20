@@ -1,0 +1,22 @@
+name: HUB Spark Test access
+on:
+  push:
+    branches: [hub-hfi-v3-lite]
+    paths: ['.github/workflows/hub_spark_access.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check available Test publishing identity
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          if [ -z "$FIREBASE_TOKEN" ]; then
+            echo 'Firebase Test publishing identity is not configured in the repository.' >> "$GITHUB_STEP_SUMMARY"
+            echo 'FIREBASE_TEST_PUBLISHER=missing'
+          else
+            echo 'A Firebase credential is configured. Project-scoped access still needs verification.' >> "$GITHUB_STEP_SUMMARY"
+            echo 'FIREBASE_TEST_PUBLISHER=configured'
+          fi
