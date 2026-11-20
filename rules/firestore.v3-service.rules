@@ -1,0 +1,7 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // The authenticated HUB service is the only data client for this V3 database.
+    match /{document=**} { allow read, write: if false; }
+  }
+}

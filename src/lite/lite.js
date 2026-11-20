@@ -1,67 +1,142 @@
-'use strict';
-// Intentionally local-only: this entry point never connects to live Firebase.
-if(!['localhost','127.0.0.1'].includes(location.hostname))throw Error('HUB Lite emulator only');
-const projectId='demo-hub-lite';
-firebase.initializeApp({projectId,apiKey:'demo-key',authDomain:projectId+'.firebaseapp.com'});
-const auth=firebase.auth(),db=firebase.firestore(),FV=firebase.firestore.FieldValue;
-auth.useEmulator('http://127.0.0.1:9097',{disableWarnings:true});
-db.useEmulator('127.0.0.1',8087);
-const $=id=>document.getElementById(id), val=id=>$(id).value.trim();
-const statuses=['Chờ tiếp nhận','Đang xử lý','Chờ bổ sung','Chờ quyết định','Chờ xác nhận','Đã đóng'];
-const labels={create:'Tạo vấn đề',accept:'Tiếp nhận',respond:'Phản hồi',supplement:'Yêu cầu bổ sung',supply:'Bổ sung thông tin',route:'Chuyển cấp / đề nghị phối hợp',decision_request:'Đề nghị quyết định',approve:'Phê duyệt',reject:'Không phê duyệt',report_done:'Báo đã xử lý',close:'Xác nhận hoàn thành',continue:'Yêu cầu xử lý tiếp',reopen:'Mở lại'};
-const pages={overview:'Tổng quan',mine:'Việc cần tôi xử lý',all:'Danh sách vấn đề',history:'Lịch sử và kết luận'};
-let user=null,member=null,directory=[],cases=[],page='mine',unsub=null,unsubMember=null,session=0,detailToken=0,busy=false,metricFilter='';
-function el(tag,text,cls){const n=document.createElement(tag);if(text!=null)n.textContent=text;if(cls)n.className=cls;return n}
-function clear(n){n.replaceChildren()}
-function feedback(s=''){ $('message').textContent=s }
-function person(id){return directory.find(p=>p.id===id)}
-function name(id){return person(id)?.name||'Đầu mối không còn trong danh bạ'}
-function unit(id){return person(id)?.unit||'—'}
-function time(t){return t?.toDate?.().toLocaleString('vi-VN')||'—'}
-function late(c){return c.status!=='Đã đóng'&&c.deadline&&c.deadline.toMillis()<Date.now()}
-function btn(text,fn,primary=false){const b=el('button',text,primary?'primary':'');b.type='button';b.onclick=fn;return b}
-function option(s,v,t){const o=el('option',t);o.value=v;s.append(o)}
-function field(parent,label,tag,id,attrs={}){const l=el('label',label);const n=el(tag);n.id=id;for(const [k,v] of Object.entries(attrs))n[k]=v;l.append(n);parent.append(l);return n}
-function fill(s,rows,all=true){const old=s.value;clear(s);if(all)option(s,'','Tất cả');for(const [v,t] of rows)option(s,v,t);if([...s.options].some(o=>o.value===old))s.value=old;}
-function eligible(severity,decision=false){const ids=[...(member?.routes||[]),...(severity==='Khẩn cấp'&&!decision?(member?.emergencyRoutes||[]):[])];return directory.filter(p=>p.id!==user?.uid&&p.active&&p.canHandle&&ids.includes(p.id)&&(!decision||p.canDecide))}
-function targets(s,severity,decision=false){clear(s);option(s,'','Chọn đầu mối');for(const p of eligible(severity,decision))option(s,p.id,p.unit+' · '+p.name+' · '+p.title)}
-function closeModal(){detailToken++;if($('modal').open)$('modal').close();let u=new URL(location.href);u.searchParams.delete('case');history.replaceState(null,'',u)}
-function setCaseUrl(id){let u=new URL(location.href);u.searchParams.set('case',id);history.replaceState(null,'',u)}
-function modal(title){detailToken++;$('modalTitle').textContent=title;clear($('modalBody'));if(!$('modal').open)$('modal').showModal();return $('modalBody')}
-function go(p){page=p;metricFilter='';render()}
-function refreshFilters(){const units=[...new Set([...directory.map(d=>d.unit),...cases.map(c=>c.sourceUnit)])].sort();const rows=units.map(u=>[u,u]);fill($('source'),rows);fill($('owner'),rows);fill($('next'),directory.map(d=>[d.id,d.name]));fill($('status'),statuses.map(s=>[s,s]));}
-function displayList(rows){const root=$('list');clear(root);if(!rows.length){root.append(el('div','Không có vấn đề trong phạm vi đang chọn.','empty'));return}
- for(const c of rows.sort((a,b)=>(b.updatedAt?.toMillis?.()||0)-(a.updatedAt?.toMillis?.()||0))){
-  const item=el('article',null,'item'),left=el('div');left.append(el('h3',c.title),el('div',c.code+' · '+c.sourceUnit+' → '+unit(c.ownerUid),'meta'),el('div',c.status+' · '+c.severity+(late(c)?' · Quá hạn':''),late(c)?'late':'meta'),el('div','Bước tiếp theo: '+(c.nextUid?name(c.nextUid):'Không còn')+' · '+nextAction(c),'meta'));item.append(left,btn('Mở vấn đề',()=>openCase(c.code)));root.append(item)
- }}
-function nextAction(c){return {'Chờ tiếp nhận':'Tiếp nhận','Đang xử lý':'Xử lý / phản hồi','Chờ bổ sung':'Bổ sung thông tin','Chờ quyết định':'Ra quyết định','Chờ xác nhận':'Xác nhận kết quả','Đã đóng':'Đã kết thúc'}[c.status]||'—'}
-function filterRows(rows){let q=val('search').toLowerCase();return rows.filter(c=>(!q||[c.code,c.title,c.reference,c.body].join(' ').toLowerCase().includes(q))&&(!val('source')||c.sourceUnit===val('source'))&&(!val('owner')||unit(c.ownerUid)===val('owner'))&&(!val('next')||c.nextUid===val('next'))&&(!val('status')||c.status===val('status'))&&(!val('severity')||c.severity===val('severity'))&&(!val('dateFrom')||c.createdAt?.toMillis()>=new Date(val('dateFrom')+'T00:00:00').getTime())&&(!val('dateTo')||c.createdAt?.toMillis()<=new Date(val('dateTo')+'T23:59:59.999').getTime()))}
-function render(){if(!member||!user)return;$('heading').textContent=pages[page];$('report').hidden=!member.canReport;document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('filters').hidden=!['all','history'].includes(page);clear($('metrics'));let rows=cases.slice();
- if(page==='overview'){for(const [key,title,f] of [['open','Đang mở',c=>c.status!=='Đã đóng'],['mine','Cần tôi xử lý',c=>c.nextUid===user.uid],['decision','Chờ quyết định',c=>c.status==='Chờ quyết định'],['late','Quá hạn',late],['closed','Đã hoàn thành',c=>c.status==='Đã đóng']]){const b=btn('',()=>{metricFilter=metricFilter===key?'':key;render()});b.className='metric';b.append(el('b',rows.filter(f).length),el('span',title));$('metrics').append(b)}if(metricFilter)rows=rows.filter(({status,nextUid,deadline,...rest})=>{const c={status,nextUid,deadline,...rest};return ({open:()=>status!=='Đã đóng',mine:()=>nextUid===user.uid,decision:()=>status==='Chờ quyết định',late:()=>late(c),closed:()=>status==='Đã đóng'})[metricFilter]()})}
- if(page==='mine')rows=rows.filter(c=>c.nextUid===user.uid&&c.status!=='Đã đóng');
- if(page==='all')rows=filterRows(rows);
- if(page==='history')rows=filterRows(rows.filter(c=>c.status==='Đã đóng'));
- displayList(rows);
+import {$,el,opt,button,choices,field,extra,date,late,nextAction,pages,statuses,statusLabel,priorities,scopes,flags,labels,normalize,safeMessage,notice,downloadBlob} from './ui.js';
+import {reportForm,actionForm,chooseFiles} from './forms.js';
+import {adminPage} from './admin.js';
+const state={member:null,dir:[],cases:[],seen:{},page:'mine',metric:'',opened:null};
+let auth,local=false,epoch=0,view=0,seq=0,refreshing=null,previewUrls=[],detailRev=0,formOpen=false;
+const ctx={state,modal,api,refresh,open:openIssue,files:sendFiles,view:()=>view,error:e=>notice(e.message)};
+const name=id=>state.dir.find(d=>d.id===id)?.name||id||'Đã kết thúc';
+function resetDialog(){view++;for(const u of previewUrls)URL.revokeObjectURL(u);previewUrls=[];$('modalMsg').textContent='';$('modalBody').replaceChildren();formOpen=false;}
+function modal(title){resetDialog();$('modalTitle').textContent=title;if(!$('modal').open)$('modal').showModal();return $('modalBody');}
+function caseUrl(code){const url=new URL(location.href);if(code)url.searchParams.set('case',code);else url.searchParams.delete('case');history.replaceState(null,'',url);}
+function closeModal(remove=true){resetDialog();state.opened=null;detailRev=0;if($('modal').open)$('modal').close();if(remove)caseUrl(null);}
+function reset(){epoch++;seq++;refreshing=null;closeModal(false);Object.assign(state,{member:null,dir:[],cases:[],seen:{},page:'mine',metric:''});$('workspace').hidden=true;
+  $('list').replaceChildren();$('metrics').replaceChildren();$('identity').textContent='';$('message').textContent='';$('search').value='';$('status').value='';$('severity').value='';}
+async function api(route,body={}){
+  const me=auth.currentUser,session=epoch;
+  if(!me)throw Error('Cần đăng nhập.');
+  const token=await me.getIdToken();if(session!==epoch)throw Error('Phiên đăng nhập đã thay đổi.');
+  let res;
+  try{res=await fetch('/api/'+route,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},cache:'no-store',body:JSON.stringify(body)});}
+  catch{throw Error('Mất kết nối. Có thể thử lại khi có mạng.');}
+  if(session!==epoch)throw Error('Phiên đăng nhập đã thay đổi.');
+  if(!res.ok){const msg=await res.json().catch(()=>({}));const err=Error(msg.error||'Dịch vụ chưa sẵn sàng.');err.status=res.status;throw err;}
+  return route==='file-read'?res.blob():res.json();
 }
-async function guarded(fn){if(busy)return;busy=true;const epoch=session;try{await fn()}catch(e){if(epoch===session)feedback('Không thực hiện được: '+(e.code||'')+' '+e.message)}finally{busy=false}}
-function eventData(d){return {rev:d.rev,action:d.lastAction,note:d.lastNote,basis:d.lastBasis,actorUid:d.actorUid,status:d.status,ownerUid:d.ownerUid,nextUid:d.nextUid,at:FV.serverTimestamp()}}
-function openReport(){if(!member?.canReport)return;const box=modal('Báo cáo vấn đề');const f=el('form');box.append(f);field(f,'Tiêu đề vấn đề *','input','rTitle',{required:true,maxLength:160});field(f,'Nội dung cần xử lý *','textarea','rBody',{required:true,maxLength:4000});const target=field(f,'Gửi đến *','select','rTarget',{required:true});targets(target,'Thông thường');const more=el('details');more.append(el('summary','Thông tin bổ sung (không bắt buộc)'));f.append(more);
- const sev=field(more,'Mức độ','select','rSeverity');['Thông thường','Quan trọng','Khẩn cấp'].forEach(s=>option(sev,s,s));sev.onchange=()=>targets(target,sev.value);
- field(more,'Mã YCTN / model / đối tượng','input','rReference',{maxLength:160});field(more,'Hạn phản hồi','input','rDeadline',{type:'datetime-local'});field(more,'Link bằng chứng HTTPS (đã phân quyền)','input','rEvidence',{type:'url',maxLength:1000});more.append(el('p','Không nhập tài liệu mật vào hồ sơ dùng chung. Upload file chưa mở trong candidate.','meta'));if(!member.reviewerUid)f.append(el('p','Chưa cấu hình người xác nhận.','late'));const save=el('button','Gửi báo cáo','primary');save.type='submit';save.disabled=!member.reviewerUid;f.append(save);
- f.onsubmit=e=>{e.preventDefault();guarded(async()=>{save.disabled=true;try{const id='VM3-'+db.collection('hub_v3_cases').doc().id.slice(0,16),ref=db.collection('hub_v3_cases').doc(id),ev=ref.collection('events').doc();const d={code:id,title:val('rTitle'),body:val('rBody'),severity:sev.value,reference:val('rReference'),evidence:val('rEvidence'),deadline:val('rDeadline')?firebase.firestore.Timestamp.fromDate(new Date(val('rDeadline'))):null,reporterUid:user.uid,reporterName:member.name,reporterTitle:member.title,sourceUnit:member.unit,sourceGroup:member.group,ownerUid:target.value,nextUid:target.value,reviewerUid:member.reviewerUid,readers:[user.uid,target.value,member.reviewerUid],status:'Chờ tiếp nhận',rev:1,lastEvent:ev.id,lastAction:'create',lastNote:'',lastBasis:'',actorUid:user.uid,createdAt:FV.serverTimestamp(),updatedAt:FV.serverTimestamp()};const batch=db.batch();batch.set(ref,d);batch.set(ev,eventData(d));await batch.commit();feedback('Đã gửi '+id);await openCase(id)}finally{save.disabled=false}})}
+const metrics=[
+ ['open','Đang mở',c=>c.status!=='Đã đóng'],['new','Cần tiếp nhận',c=>c.status==='Chờ tiếp nhận'],
+ ['work','Đang xử lý',c=>c.status==='Đang xử lý'],['wait','Chờ phản hồi hoặc quyết định',c=>['Chờ bổ sung','Chờ quyết định','Chờ xác nhận'].includes(c.status)],
+ ['late','Quá hạn',late],['urgent','Khẩn cấp',c=>c.severity==='Khẩn cấp'&&c.status!=='Đã đóng'],['closed','Đã hoàn thành',c=>c.status==='Đã đóng']
+];
+function inbox(){return state.cases.filter(c=>c.involved&&(c.actorUid!==state.member.uid&&(state.seen[c.code]||0)<c.rev ||
+  c.nextUid===state.member.uid && (late(c)||(c.deadline>Date.now()&&c.deadline-Date.now()<86400000))));}
+function render(){
+  const m=state.member;if(!m)return;
+  $('identity').textContent=m.name+' · '+m.unit;$('heading').textContent=pages[state.page];$('report').hidden=!m.canReport;$('admin').hidden=!m.manageAccounts;
+  const n=inbox().length;$('notices').textContent='Thông báo'+(n?' ('+n+')':'');
+  document.querySelectorAll('nav button').forEach(b=>b.setAttribute('aria-current',b.dataset.page===state.page?'page':'false'));
+  const metricBox=$('metrics');metricBox.replaceChildren();let rows=state.cases.slice();
+  $('filters').hidden=!['all','history'].includes(state.page);
+  if(state.page==='overview'){
+    for(const [key,title,f] of metrics){const b=button('',()=>{state.metric=state.metric===key?'':key;render();});b.className='metric';b.setAttribute('aria-pressed',String(state.metric===key));b.append(el('b',rows.filter(f).length),el('span',title));metricBox.append(b);}
+    if(state.metric)rows=rows.filter(metrics.find(v=>v[0]===state.metric)[2]);
+  }
+  if(state.page==='mine')rows=rows.filter(c=>c.status!=='Đã đóng'&&(c.nextUid===m.uid || c.collaborators?.includes(m.uid)&&(c.coordinationReplies?.[m.uid]||0)<(c.inviteRevisions?.[m.uid]||1)));
+  if(state.page==='history')rows=rows.filter(c=>c.status==='Đã đóng'||!!c.conclusion);
+  if(!$('filters').hidden){const q=normalize($('search').value);rows=rows.filter(c=>(!q||normalize([c.code,c.title,c.body,c.sourceUnit,c.ownerUnit,c.ownerName,name(c.nextUid),c.reference,c.conclusion,c.result].join(' ')).includes(q))
+    &&(!$('status').value||$('status').value===c.status)&&(!$('severity').value||$('severity').value===c.severity||($('severity').value==='Bình thường'&&c.severity==='Thông thường')));}
+  display($('list'),rows);
 }
-function actions(c){if(c.status==='Đã đóng')return c.reviewerUid===user.uid&&member.canClose?['reopen']:[];if(c.nextUid!==user.uid)return[];if(c.status==='Chờ tiếp nhận')return member.canHandle?['accept']:[];if(c.status==='Đang xử lý')return member.canHandle?['respond','supplement',...(eligible(c.severity).length?['route']:[]),...(eligible('Thông thường',true).length?['decision_request']:[]),'report_done']:[];if(c.status==='Chờ bổ sung')return ['supply'];if(c.status==='Chờ quyết định')return member.canDecide?['approve','reject']:[];if(c.status==='Chờ xác nhận')return member.canClose&&user.uid===c.reviewerUid?['close','continue']:[];return []}
-function makePatch(c,action,note,basis,target,eventId){if(!actions(c).includes(action))throw Error('Hành động không còn hợp lệ.');let owner=c.ownerUid,next=c.nextUid,status=c.status,readers=c.readers.slice();const add=id=>{if(!readers.includes(id))readers.push(id)};
- switch(action){case 'accept':status='Đang xử lý';break;case 'supplement':status='Chờ bổ sung';next=c.reporterUid;break;case 'supply':case 'approve':case 'reject':case 'continue':case 'reopen':status='Đang xử lý';next=owner;break;case 'route':owner=target;next=target;status='Chờ tiếp nhận';add(target);break;case 'decision_request':next=target;status='Chờ quyết định';add(target);break;case 'report_done':next=c.reviewerUid;status='Chờ xác nhận';break;case 'close':status='Đã đóng';next='';break;}
- return {ownerUid:owner,nextUid:next,readers,status,rev:c.rev+1,lastEvent:eventId,lastAction:action,lastNote:note,lastBasis:basis,actorUid:user.uid,updatedAt:FV.serverTimestamp()}
+function display(root,rows){root.replaceChildren();if(!rows.length){root.append(el('p','Chưa có vấn đề trong phạm vi đang xem.','empty'));return;}
+  for(const c of rows.sort((a,b)=>b.updatedAt-a.updatedAt)){
+    const item=el('article',null,'item'),left=el('div');const tag=el('span',statusLabel(c.status),'tag');left.append(el('div',c.code+' · '+date(c.createdAt),'meta'),el('h3',c.title),tag,el('span',c.severity+(late(c)?' · Quá hạn':''),late(c)||c.severity==='Khẩn cấp'?'priority warn':'priority'),
+      el('div','Báo cáo: '+c.sourceUnit+' · Chủ trì: '+(c.ownerUnit||'')+' · '+(c.ownerName||name(c.ownerUid)),'meta'),
+      el('div',c.status==='Đã đóng'?'Đã có kết luận':(c.collaborators?.includes(state.member.uid)&&c.nextUid!==state.member.uid?'Phối hợp phản hồi · ':'')+nextAction(c)+' · '+name(c.nextUid),'next'));
+    item.append(left,button('Mở vấn đề',()=>openIssue(c.code).catch(ctx.error)));root.append(item);
+  }
 }
-async function commitAction(c,action,note='',basis='',target=''){await guarded(async()=>{const ref=db.collection('hub_v3_cases').doc(c.code),ev=ref.collection('events').doc();await db.runTransaction(async tx=>{const s=await tx.get(ref);if(!s.exists||s.data().rev!==c.rev)throw Error('Dữ liệu đã thay đổi. Mở lại vấn đề.');const patch=makePatch(s.data(),action,note,basis,target,ev.id);tx.update(ref,patch);tx.set(ev,eventData(patch))});feedback('Đã lưu '+labels[action]);await openCase(c.code)})}
-function actionForm(c,k){if(k==='accept'){commitAction(c,k);return}const box=modal(labels[k]+' · '+c.code);const f=el('form');box.append(f);field(f,'Nội dung / lý do *','textarea','aNote',{required:true,maxLength:4000});if(['approve','reject'].includes(k))field(f,'Căn cứ quyết định *','textarea','aBasis',{required:true,maxLength:1000});if(['route','decision_request'].includes(k)){const s=field(f,'Đầu mối tiếp theo *','select','aTarget',{required:true});targets(s,c.severity,k==='decision_request')}const b=el('button','Xác nhận','primary');b.type='submit';f.append(b);f.onsubmit=e=>{e.preventDefault();commitAction(c,k,val('aNote'),$('aBasis')?val('aBasis'):'',$('aTarget')?val('aTarget'):'')}}
-async function openCase(id){if(!user||!member)return;const epoch=session;const box=modal(id);const token=detailToken;box.append(el('p','Đang tải hồ sơ...'));try{const ref=db.collection('hub_v3_cases').doc(id);const snap=await ref.get();if(epoch!==session||token!==detailToken)return;if(!snap.exists)throw Error('Không tìm thấy vấn đề');const c=snap.data();setCaseUrl(id);clear(box);$('modalTitle').textContent=c.code+' · '+c.title;box.append(el('p',c.status+' · '+c.severity+(late(c)?' · Quá hạn':''),late(c)?'late':'meta'),el('p',c.reporterName+' · '+c.reporterTitle+' · '+c.sourceUnit+(c.sourceGroup?' / '+c.sourceGroup:''),'meta'),el('p','Chủ trì: '+name(c.ownerUid)+' · '+unit(c.ownerUid)),el('p','Bước tiếp theo: '+(c.nextUid?name(c.nextUid)+' · '+nextAction(c):'Đã kết thúc')),el('p','Hạn: '+time(c.deadline)+' · YCTN/model: '+(c.reference||'—'),'meta'),el('p',c.body,'detailText'));if(c.evidence&&c.evidence.startsWith('https://')){const a=el('a','Mở link bằng chứng');a.href=c.evidence;a.target='_blank';a.rel='noopener noreferrer';box.append(a)}const bar=el('div',null,'actionbar');for(const k of actions(c))bar.append(btn(labels[k],()=>actionForm(c,k),k==='accept'||k==='close'));bar.append(btn('Sao chép mã và link',async()=>{try{await navigator.clipboard.writeText('HUB-HFI '+id+' — '+location.href);feedback('Đã sao chép mã và link. Không kèm nội dung mật.')}catch(e){feedback('Không sao chép được; dùng URL trên thanh địa chỉ.')}}));box.append(bar,el('h2','Lịch sử và kết luận'));const ev=await ref.collection('events').get();if(epoch!==session||token!==detailToken)return;for(const doc of ev.docs.sort((a,b)=>a.data().rev-b.data().rev)){const d=doc.data();box.append(el('div',time(d.at)+' · '+name(d.actorUid)+' · '+(labels[d.action]||d.action)+'\n'+d.status+(d.note?'\n'+d.note:'')+(d.basis?'\nCăn cứ: '+d.basis:''),'event'))}}catch(e){if(epoch===session&&token===detailToken){clear(box);box.append(el('p','Hồ sơ không tồn tại hoặc bạn không có quyền truy cập.','late'))}}}
-function reset(){session++;detailToken++;unsub?.();unsubMember?.();unsub=unsubMember=null;user=member=null;cases=[];directory=[];clear($('list'));clear($('metrics'));clear($('modalBody'));if($('modal').open)$('modal').close();$('workspace').hidden=true;$('login').hidden=false}
-$('signIn').onclick=()=>guarded(()=>auth.signInWithEmailAndPassword(val('demoAccount')+'@demo.invalid','HUB-demo-only-2026!'));
-$('signOut').onclick=()=>auth.signOut();$('report').onclick=openReport;$('closeModal').onclick=closeModal;$('modal').addEventListener('cancel',e=>{e.preventDefault();closeModal()});
-document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>go(b.dataset.page));document.querySelectorAll('#filters input,#filters select').forEach(n=>n.oninput=render);
-auth.onAuthStateChanged(async u=>{reset();feedback();if(!u)return;user=u;const epoch=session;try{const s=await db.collection('hub_v3_members').doc(u.uid).get();if(epoch!==session)return;if(!s.exists||!s.data().active)throw Error('Tài khoản chưa được cấp quyền');member=s.data();const ds=await db.collection('hub_v3_directory').get();if(epoch!==session)return;directory=ds.docs.map(d=>({id:d.id,...d.data()}));$('identity').textContent=member.name+' · '+member.title+' · '+member.unit;$('login').hidden=true;$('workspace').hidden=false;page='mine';metricFilter='';refreshFilters();render();let query=db.collection('hub_v3_cases');if(!member.overview)query=query.where('readers','array-contains',u.uid);unsub=query.onSnapshot(snap=>{if(epoch!==session)return;cases=snap.docs.map(d=>d.data());refreshFilters();render()},err=>{if(epoch!==session)return;cases=[];render();feedback('Lỗi đồng bộ: '+err.message)});unsubMember=db.collection('hub_v3_members').doc(u.uid).onSnapshot(x=>{if(epoch===session&&(!x.exists||!x.data().active||JSON.stringify(x.data())!==JSON.stringify(member))){feedback('Quyền đã thay đổi. Đăng nhập lại.');auth.signOut()}});const id=new URL(location.href).searchParams.get('case');if(id)openCase(id)}catch(e){if(epoch===session){feedback(e.message);await auth.signOut()}}});
-$('portal').onclick=e=>{const p=new URLSearchParams(location.search);if(p.get('fromPortal')==='1'&&window.opener&&!window.opener.closed){e.preventDefault();window.close();if(!window.closed)location.href='https://ptn-hfi-portal.firebaseapp.com/?returnFromHub=1'}};
-setInterval(()=>{if(member)render()},60000);
+async function refresh(){
+  if(!auth?.currentUser)return;
+  const session=epoch,request=++seq;
+  const p=api('workspace').then(d=>{
+    if(session!==epoch||request!==seq)return;
+    Object.assign(state,{member:d.member,dir:d.directory,cases:d.cases,seen:d.seen});$('workspace').hidden=false;$('login').hidden=true;render();
+    if(state.opened){const c=state.cases.find(i=>i.code===state.opened);
+      if(!c){closeModal();notice('Hồ sơ nằm ngoài phạm vi quyền hiện tại.');}
+      else if(!formOpen && detailRev && c.rev!==detailRev)openIssue(c.code).catch(ctx.error);}
+  }).catch(err=>{if(session===epoch && [401,403].includes(err.status)){
+      const userId=auth.currentUser?.uid;reset();$('login').hidden=false;$('message').textContent=err.message+(userId?' Mã tài khoản (UID): '+userId:'');
+      if(auth.currentUser){const b=button('Đăng xuất',()=>auth.signOut());$('message').append(document.createTextNode(' '),b);}
+    }else if(session===epoch)throw err;});
+  refreshing=p;try{await p;}finally{if(refreshing===p)refreshing=null;}
+}
+async function openIssue(code){
+  if(!state.member)return;
+  const box=modal('Chi tiết vấn đề'),token=view;state.opened=code;detailRev=0;box.append(el('p','Đang tải hồ sơ…'));
+  try{
+    const {issue:c,events,files}=await api('detail',{code});if(view!==token)return;
+    detailRev=c.rev;caseUrl(code);box.replaceChildren();$('modalTitle').textContent=c.title;
+    box.append(el('div',c.code+' · '+statusLabel(c.status)+' · '+c.severity,'tag'),el('p',c.body,'detailText'),
+      el('p','Người báo cáo: '+c.reporterName+' · '+c.sourceUnit+' · '+date(c.createdAt),'meta'),
+      el('p','Chủ trì: '+(c.ownerName||name(c.ownerUid))+' · '+(c.ownerUnit||'')),
+      el('p','Bước tiếp theo: '+nextAction(c)+(c.nextUid?' · '+name(c.nextUid):'')));
+    if(c.collaborators?.length)box.append(el('p','Phối hợp: '+c.collaborators.map(name).join(', ')));
+    if(c.deadline||c.reference)box.append(el('p',(c.deadline?'Hạn phản hồi: '+date(c.deadline)+' · ':'')+(c.reference||''),'meta'));
+    const flagText=Object.entries(c.flags||{}).filter(([,v])=>v).map(([k])=>flags[k]);if(flagText.length)box.append(el('p',flagText.join(' · '),'priority'));
+    if((c.flags?.safety||c.severity==='Khẩn cấp')&&c.status!=='Đã đóng')box.append(el('p',safeMessage,'warning'));
+    if(c.result)box.append(el('p','Kết quả: '+c.result,'event'));if(c.conclusion)box.append(el('p','Kết luận đã ghi: '+c.conclusion+(c.confirmedBy?' · '+c.confirmedBy.name:''),'event'));
+    const actions=el('div',null,'actionbar');for(const k of c.actions){const b=button(labels[k],async()=>{try{b.disabled=true;await actionForm(ctx,c,k);if(k!=='accept')formOpen=true;}catch(e){ctx.error(e);}finally{b.disabled=false;}},['accept','close','report_done'].includes(k));actions.append(b);}
+    box.append(actions);
+    const fs=extra(box,'Tệp đính kèm ('+files.filter(f=>f.state==='ready').length+')');
+    for(const f of files){const line=el('div',null,'file');line.append(el('span',f.name+' · '+f.uploaderName+' · '+date(f.at||f.startedAt)));
+      if(f.state==='ready')line.append(button(f.type.startsWith('image/')||f.type==='application/pdf'?'Xem tệp':'Tải tệp',async()=>{try{
+        const blob=await api('file-read',{code,fileId:f.id});if(token!==view)return;
+        if(f.type.startsWith('image/')||f.type==='application/pdf'){
+          const url=URL.createObjectURL(blob);previewUrls.push(url);
+          const node=el(f.type.startsWith('image/')?'img':'iframe');node.src=url;node.className='preview';node.title=f.name;if(node.tagName==='IMG')node.alt=f.name;else node.setAttribute('sandbox','');
+          line.append(node,button('Tải xuống',()=>downloadBlob(blob,f.name)));
+        }else downloadBlob(blob,f.name);
+      }catch(e){ctx.error(e);}}));else line.append(el('small','Chờ hoàn tất. Chọn lại đúng tệp để thử lại.'));
+      fs.append(line);}
+    if(c.status!=='Đã đóng' && (c.ownerUid===state.member.uid||c.reporterUid===state.member.uid||c.nextUid===state.member.uid||c.collaborators?.includes(state.member.uid))){
+      const f=el('form');fs.append(f);const inp=chooseFiles(f), ids=new Map(files.filter(x=>x.state==='pending').map(x=>[x.name+'_'+x.size,x.id]));f.append(button('Lưu tệp',async()=>{if(!inp.files.length)return;
+        try{await sendFiles(code,inp.files,ids);await openIssue(code);notice('Đã lưu tệp.');}catch(e){ctx.error(e);}}));}
+    box.append(button('Sao chép mã và liên kết',async()=>{try{await navigator.clipboard.writeText('HUB-HFI '+code+' '+location.href);notice('Đã sao chép mã và liên kết.');}catch{notice('Có thể sao chép địa chỉ trên thanh trình duyệt.');}}),el('h3','Lịch sử và kết luận'));
+    for(const e of events){const line=el('div',null,'event');line.append(el('strong',labels[e.action]||e.action),el('small',date(e.at)+' · '+(e.actor?.name||name(e.actorUid))+(e.actor?.unit?' · '+e.actor.unit:'')));
+      if(e.before&&e.before.status!==e.after?.status)line.append(el('div',statusLabel(e.before.status)+' → '+statusLabel(e.after.status)));
+      if(e.target)line.append(el('div','Bên nhận: '+e.target.name+' · '+e.target.unit));if(e.note)line.append(el('div',e.note));if(e.basis)line.append(el('div','Căn cứ: '+e.basis));box.append(line);}
+    await api('seen',{code,rev:c.rev});if(token===view){state.seen[code]=c.rev;render();}
+  }catch(e){if(token===view){box.replaceChildren(el('p',e.message,'warning'));detailRev=0;}}
+}
+async function sendFiles(code,list,ids){
+  for(const f of list){if(f.size>5*1024*1024)throw Error('Tệp vượt quá 5 MB: '+f.name);
+    const k=f.name+'_'+f.size;if(!ids.has(k))ids.set(k,crypto.randomUUID());
+    const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onerror=()=>reject(Error('Chưa đọc được tệp '+f.name));r.onload=()=>resolve(r.result.split(',')[1]);r.readAsDataURL(f);});
+    await api('file-add',{code,requestId:ids.get(k),name:f.name,data});}
+}
+function loginMethods(){
+  const box=$('methods');box.replaceChildren();
+  if(local){const s=field(box,'Vai trò thực nghiệm','select','demoAccount');for(const [k,l] of Object.entries({ptn:'Trưởng phòng Thử nghiệm',pkt:'Trưởng phòng Kỹ thuật',engineer:'Kỹ sư trực',qlcl:'Trưởng phòng QLCL',director:'Giám đốc',office:'HCNS',sampling:'Lấy mẫu',lead:'Trưởng nhóm',staff:'Thử nghiệm viên',admin:'Quản trị kỹ thuật',accounts:'Quản trị tài khoản',viewer:'Người chỉ xem'}))opt(s,k,l);
+    box.append(button('Đăng nhập thử nghiệm',async()=>{try{const r=await fetch('/api/demo-login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role:s.value})});const d=await r.json();if(!r.ok)throw Error(d.error);await auth.signInWithCustomToken(d.token);}catch(e){ctx.error(e);}},true));
+  }else{box.append(button('Đăng nhập bằng Google',()=>auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(()=>notice('Chưa đăng nhập được bằng Google. Kiểm tra tài khoản hoặc thử lại.')),true));}
+}
+async function start(){
+  const build=await (await fetch('/build-info.json',{cache:'no-store'})).json(),host=location.hostname;
+  local=build.mode==='emulator'&&['127.0.0.1','localhost'].includes(host)&&build.projectId==='demo-hub-lite';
+  const cloud=build.mode==='test'&&/^hub-ptn-test--hub-v3-lite-[a-z0-9-]+\.(web\.app|firebaseapp\.com)$/.test(host)&&location.protocol==='https:'&&build.projectId==='hub-ptn-test';
+  if(!local&&!cloud)throw Error('Địa chỉ này chưa được cấu hình cho HUB thực nghiệm.');
+  const cfg=local?{projectId:'demo-hub-lite',apiKey:'demo-key',authDomain:'demo-hub-lite.firebaseapp.com'}:await(await fetch('/__/firebase/init.json',{cache:'no-store'})).json();
+  if(cfg.projectId!==build.projectId||(!local&&cfg.authDomain!=='hub-ptn-test.firebaseapp.com'))throw Error('Cấu hình đăng nhập không thuộc môi trường Test.');
+  firebase.initializeApp(cfg);auth=firebase.auth();if(local)auth.useEmulator('http://127.0.0.1:9097',{disableWarnings:true});
+  $('env').textContent=(local?'Thực nghiệm nội bộ trên máy':'Firebase Test trực tuyến')+' · V3.0 LITE · Candidate 02';loginMethods();
+  auth.onAuthStateChanged(async u=>{reset();$('login').hidden=!!u;if(!u)return;try{await refresh();const code=new URL(location.href).searchParams.get('case');if(code&&state.member)await openIssue(code);}catch(e){ctx.error(e);}});
+}
+$('closeModal').onclick=()=>closeModal();$('modal').addEventListener('cancel',e=>{e.preventDefault();closeModal();});
+$('signOut').onclick=()=>{caseUrl(null);auth.signOut();};
+$('report').onclick=()=>{state.opened=null;caseUrl(null);reportForm(ctx);formOpen=true;};$('admin').onclick=()=>{closeModal();adminPage(ctx).catch(ctx.error);};
+$('notices').onclick=()=>{closeModal();const box=modal('Thông báo');display(box,inbox());};
+for(const b of document.querySelectorAll('nav button'))b.onclick=()=>{state.page=b.dataset.page;state.metric='';render();};
+choices($('status'),statuses.map(s=>[s,statusLabel(s)]),'Tất cả');choices($('severity'),priorities.map(s=>[s,s]),'Tất cả');
+for(const n of document.querySelectorAll('#filters input,#filters select'))n.oninput=render;
+const tick=()=>{if(state.member&&!document.hidden&&!refreshing)refresh().catch(ctx.error);};
+setInterval(tick,15000);window.addEventListener('focus',tick);window.addEventListener('online',tick);
+start().catch(e=>{$('env').textContent='Chưa kết nối được HUB';notice(e.message);});

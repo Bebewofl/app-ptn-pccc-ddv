@@ -1,6 +1,6 @@
 {
   "firestore": {
-    "rules": "rules/firestore.v3-lite.emulator.rules"
+    "rules": "rules/firestore.v3-service.rules"
   },
   "hosting": {
     "public": "dist-lite",
@@ -17,6 +17,15 @@
             "value": "no-store"
           }
         ]
+      }
+    ],
+    "rewrites": [
+      {
+        "source": "/api/**",
+        "function": {
+          "functionId": "hubLiteApi",
+          "region": "us-central1"
+        }
       }
     ]
   },
@@ -36,6 +45,22 @@
     "ui": {
       "enabled": false
     },
-    "singleProjectMode": true
+    "singleProjectMode": true,
+    "storage": {
+      "host": "127.0.0.1",
+      "port": 9197
+    },
+    "functions": {
+      "host": "127.0.0.1",
+      "port": 5007
+    }
+  },
+  "storage": {
+    "rules": "rules/storage.v3-service.rules"
+  },
+  "functions": {
+    "source": "functions-lite",
+    "codebase": "hub-lite",
+    "runtime": "nodejs22"
   }
 }

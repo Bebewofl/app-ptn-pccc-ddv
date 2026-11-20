@@ -8,7 +8,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 24
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,7 +18,34 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - run: npm ci --ignore-scripts --no-audit --no-fund
-      - run: node --check src/lite/lite.js && node --check scripts/lite-demo.mjs && node scripts/build-lite.mjs
-      - run: node node_modules/firebase-tools/lib/bin/firebase.js emulators:exec --project demo-hub-lite --only firestore --config firebase.lite.emulator.json "node --test tests/lite/*.test.mjs"
-      - run: node node_modules/firebase-tools/lib/bin/firebase.js emulators:exec --project demo-hub-lite --only auth,firestore,hosting --config firebase.lite.emulator.json "HUB_LITE_SEED_ONLY=1 node scripts/lite-demo.mjs"
+      - name: Install exact application dependencies
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm --prefix functions-lite ci --ignore-scripts --no-audit --no-fund
+          python -m pip install playwright==1.62.0
+          python -m playwright install --with-deps chromium webkit
+      - name: Check source and build both profiles
+        run: |
+          for f in functions-lite/*.js src/lite/*.js scripts/*lite*.mjs tests/pilot/*.mjs; do node --check "$f"; done
+          node scripts/build-lite.mjs test
+          node scripts/build-lite.mjs
+      - name: Candidate 01 archived rules regression on disposable database
+        run: node_modules/.bin/firebase emulators:exec --project demo-hub-lite --only firestore --config firebase.lite.emulator.json "node --test tests/lite/*.test.mjs"
+      - name: Service, authorization, attachments, browser and export
+        env:
+          HUB_LITE_SEED_ONLY: "1"
+          HUB_WEBKIT: "1"
+          PYTHONUNBUFFERED: "1"
+        run: |
+          mkdir -p pilot-evidence
+          node_modules/.bin/firebase emulators:exec --project demo-hub-lite --only auth,firestore,storage,functions,hosting --config firebase.lite.emulator.json --export-on-exit "$RUNNER_TEMP/hub-export" 'node scripts/lite-demo.mjs && node --test tests/pilot/api.test.mjs && python tests/pilot/browser.py && node tests/pilot/restore.mjs save pilot-evidence/fingerprint.json'
+      - name: Restore into fresh emulators and compare
+        run: node_modules/.bin/firebase emulators:exec --project demo-hub-lite --only auth,firestore,storage --config firebase.lite.emulator.json --import "$RUNNER_TEMP/hub-export" "node tests/pilot/restore.mjs verify pilot-evidence/fingerprint.json"
+      - name: Save synthetic browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hub-v3-pilot-evidence
+          path: pilot-evidence/
+          if-no-files-found: ignore
+          retention-days: 14

@@ -1,0 +1,42 @@
+{
+  "firestore": [
+    {
+      "database": "hub-v3-lite",
+      "rules": "rules/firestore.v3-service.rules"
+    }
+  ],
+  "hosting": {
+    "public": "dist-lite",
+    "ignore": [
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "headers": [
+      {
+        "source": "**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-store"
+          }
+        ]
+      }
+    ],
+    "rewrites": [
+      {
+        "source": "/api/**",
+        "function": {
+          "functionId": "hubLiteApi",
+          "region": "us-central1",
+          "pinTag": true
+        }
+      }
+    ],
+    "site": "hub-ptn-test"
+  },
+  "functions": {
+    "source": "functions-lite",
+    "codebase": "hub-lite",
+    "runtime": "nodejs22"
+  }
+}
