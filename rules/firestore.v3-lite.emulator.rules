@@ -14,7 +14,7 @@ service cloud.firestore {
    return allowedTarget(id,'Thông thường') && member(id).canDecide == true;
   }
   function readCase(d){return active() && (uid() in d.readers || me().overview == true);}
-  function validText(s,max){return s is string && s.size()>0 && s.size()<=max && s.matches('.*\\S.*');}
+  function validText(s,max){return s is string && s.size()>0 && s.size()<=max && !s.matches('\\s*');}
   function optionalText(s,max){return s is string && s.size()<=max;}
   function appendReader(old,id){return id in old ? old : old.concat([id]);}
   function keys(d){
