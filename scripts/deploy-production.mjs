@@ -4,6 +4,7 @@ import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+if(await fs.access(path.join(root,'firebase.lite.emulator.json')).then(()=>true).catch(()=>false))throw Error('HUB-01: production build/deploy blocked on the V3 Lite candidate branch');
 const info=JSON.parse(await fs.readFile(path.join(root,'dist-production/build-info.json'),'utf8'));
 const config=JSON.parse(await fs.readFile(path.join(root,'firebase.production.generated.json'),'utf8'));
 const html=await fs.readFile(path.join(root,'dist-production/index.html'),'utf8');
