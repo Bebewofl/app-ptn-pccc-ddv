@@ -5,6 +5,7 @@ import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+if(await fs.access(path.join(root,'firebase.lite.emulator.json')).then(()=>true).catch(()=>false))throw Error('HUB-01: production build/deploy blocked on the V3 Lite candidate branch');
 const dist=path.join(root,'dist-production');
 const meta=JSON.parse(await fs.readFile(path.join(root,'VERSION.production.json'),'utf8'));
 const firebaseConfig=JSON.parse(await fs.readFile(path.join(root,'config/firebase.production.json'),'utf8'));
