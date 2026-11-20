@@ -2,21 +2,21 @@ import {$,el,opt,button,choices,field,extra,date,late,nextAction,pages,statuses,
 import {reportForm,actionForm,chooseFiles} from './forms.js';
 import {adminPage} from './admin.js';
 const state={member:null,dir:[],cases:[],seen:{},page:'mine',metric:'',opened:null};
-let auth,local=false,epoch=0,view=0,seq=0,refreshing=null,previewUrls=[],detailRev=0,formOpen=false;
+let auth,pilotRole='',local=false,epoch=0,view=0,seq=0,refreshing=null,previewUrls=[],detailRev=0,formOpen=false;
 const ctx={state,modal,api,refresh,open:openIssue,files:sendFiles,view:()=>view,error:e=>notice(e.message)};
 const name=id=>state.dir.find(d=>d.id===id)?.name||id||'Đã kết thúc';
 function resetDialog(){view++;for(const u of previewUrls)URL.revokeObjectURL(u);previewUrls=[];$('modalMsg').textContent='';$('modalBody').replaceChildren();formOpen=false;}
 function modal(title){resetDialog();$('modalTitle').textContent=title;if(!$('modal').open)$('modal').showModal();return $('modalBody');}
 function caseUrl(code){const url=new URL(location.href);if(code)url.searchParams.set('case',code);else url.searchParams.delete('case');history.replaceState(null,'',url);}
 function closeModal(remove=true){resetDialog();state.opened=null;detailRev=0;if($('modal').open)$('modal').close();if(remove)caseUrl(null);}
-function reset(){epoch++;seq++;refreshing=null;closeModal(false);Object.assign(state,{member:null,dir:[],cases:[],seen:{},page:'mine',metric:''});$('workspace').hidden=true;
+function reset(){pilotRole='';$('pilotLabel').hidden=true;epoch++;seq++;refreshing=null;closeModal(false);Object.assign(state,{member:null,dir:[],cases:[],seen:{},page:'mine',metric:''});$('workspace').hidden=true;
   $('list').replaceChildren();$('metrics').replaceChildren();$('identity').textContent='';$('message').textContent='';$('search').value='';$('status').value='';$('severity').value='';}
 async function api(route,body={}){
   const me=auth.currentUser,session=epoch;
   if(!me)throw Error('Cần đăng nhập.');
   const token=await me.getIdToken();if(session!==epoch)throw Error('Phiên đăng nhập đã thay đổi.');
   let res;
-  try{res=await fetch('/api/'+route,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},cache:'no-store',body:JSON.stringify(body)});}
+  try{res=await fetch('/api/'+route,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token,...(pilotRole?{'X-Hub-Pilot-Role':pilotRole}:{})},cache:'no-store',body:JSON.stringify(body)});}
   catch{throw Error('Mất kết nối. Có thể thử lại khi có mạng.');}
   if(session!==epoch)throw Error('Phiên đăng nhập đã thay đổi.');
   if(!res.ok){const msg=await res.json().catch(()=>({}));const err=Error(msg.error||'Dịch vụ chưa sẵn sàng.');err.status=res.status;throw err;}
@@ -98,7 +98,7 @@ async function openIssue(code){
       }catch(e){ctx.error(e);}}));else line.append(el('small','Chờ hoàn tất. Chọn lại đúng tệp để thử lại.'));
       fs.append(line);}
     if(c.status!=='Đã đóng' && (c.ownerUid===state.member.uid||c.reporterUid===state.member.uid||c.nextUid===state.member.uid||c.collaborators?.includes(state.member.uid))){
-      const f=el('form');fs.append(f);const inp=chooseFiles(f), ids=new Map(files.filter(x=>x.state==='pending').map(x=>[x.name+'_'+x.size,x.id]));f.append(button('Lưu tệp',async()=>{if(!inp.files.length)return;
+      const f=el('form');fs.append(f);const inp=chooseFiles(f), ids=new Map(files.filter(x=>x.state==='pending').map(x=>[x.name+'_'+x.sha256,x.id]));f.append(button('Lưu tệp',async()=>{if(!inp.files.length)return;
         try{await sendFiles(code,inp.files,ids);await openIssue(code);notice('Đã lưu tệp.');}catch(e){ctx.error(e);}}));}
     box.append(button('Sao chép mã và liên kết',async()=>{try{await navigator.clipboard.writeText('HUB-HFI '+code+' '+location.href);notice('Đã sao chép mã và liên kết.');}catch{notice('Có thể sao chép địa chỉ trên thanh trình duyệt.');}}),el('h3','Lịch sử và kết luận'));
     for(const e of events){const line=el('div',null,'event');line.append(el('strong',labels[e.action]||e.action),el('small',date(e.at)+' · '+(e.actor?.name||name(e.actorUid))+(e.actor?.unit?' · '+e.actor.unit:'')));
@@ -109,13 +109,14 @@ async function openIssue(code){
 }
 async function sendFiles(code,list,ids){
   for(const f of list){if(f.size>5*1024*1024)throw Error('Tệp vượt quá 5 MB: '+f.name);
-    const k=f.name+'_'+f.size;if(!ids.has(k))ids.set(k,crypto.randomUUID());
+    const digest=await crypto.subtle.digest('SHA-256',await f.arrayBuffer());
+    const k=f.name+'_'+Array.from(new Uint8Array(digest),n=>n.toString(16).padStart(2,'0')).join('');if(!ids.has(k))ids.set(k,crypto.randomUUID());
     const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onerror=()=>reject(Error('Chưa đọc được tệp '+f.name));r.onload=()=>resolve(r.result.split(',')[1]);r.readAsDataURL(f);});
     await api('file-add',{code,requestId:ids.get(k),name:f.name,data});}
 }
 function loginMethods(){
   const box=$('methods');box.replaceChildren();
-  if(local){const s=field(box,'Vai trò thực nghiệm','select','demoAccount');for(const [k,l] of Object.entries({ptn:'Trưởng phòng Thử nghiệm',pkt:'Trưởng phòng Kỹ thuật',engineer:'Kỹ sư trực',qlcl:'Trưởng phòng QLCL',director:'Giám đốc',office:'HCNS',sampling:'Lấy mẫu',lead:'Trưởng nhóm',staff:'Thử nghiệm viên',admin:'Quản trị kỹ thuật',accounts:'Quản trị tài khoản',viewer:'Người chỉ xem'}))opt(s,k,l);
+  if(local){const s=field(box,'Vai trò thực nghiệm','select','demoAccount');for(const [k,l] of Object.entries({ptn:'Trưởng phòng Thử nghiệm',pkt:'Trưởng phòng Kỹ thuật',engineer:'Kỹ sư trực',qlcl:'Trưởng phòng QLCL',director:'Giám đốc',office:'HCNS',sampling:'Lấy mẫu',warehouse:'Kho',lead:'Trưởng nhóm',staff:'Thử nghiệm viên',admin:'Quản trị kỹ thuật',accounts:'Quản trị tài khoản',viewer:'Người chỉ xem',operator:'Người nghiệm thu đa vai'}))opt(s,k,l);
     box.append(button('Đăng nhập thử nghiệm',async()=>{try{const r=await fetch('/api/demo-login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role:s.value})});const d=await r.json();if(!r.ok)throw Error(d.error);await auth.signInWithCustomToken(d.token);}catch(e){ctx.error(e);}},true));
   }else{box.append(button('Đăng nhập bằng Google',()=>auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(()=>notice('Chưa đăng nhập được bằng Google. Kiểm tra tài khoản hoặc thử lại.')),true));}
 }
@@ -128,9 +129,12 @@ async function start(){
   if(cfg.projectId!==build.projectId||(!local&&cfg.authDomain!=='hub-ptn-test.firebaseapp.com'))throw Error('Cấu hình đăng nhập không thuộc môi trường Test.');
   firebase.initializeApp(cfg);auth=firebase.auth();if(local)auth.useEmulator('http://127.0.0.1:9097',{disableWarnings:true});
   $('env').textContent=(local?'Thực nghiệm nội bộ trên máy':'Firebase Test trực tuyến')+' · V3.0 LITE · Candidate 02';loginMethods();
-  auth.onAuthStateChanged(async u=>{reset();$('login').hidden=!!u;if(!u)return;try{await refresh();const code=new URL(location.href).searchParams.get('case');if(code&&state.member)await openIssue(code);}catch(e){ctx.error(e);}});
+  auth.onAuthStateChanged(async u=>{reset();$('login').hidden=!!u;if(!u)return;try{const who=await api('session');if(auth.currentUser?.uid!==u.uid)return;
+      if(who.roles.length){choices($('pilotRole'),who.roles.map(r=>[r.uid,r.unit+' · '+r.name]));pilotRole=who.roles[0].uid;$('pilotLabel').hidden=false;}
+      await refresh();const code=new URL(location.href).searchParams.get('case');if(code&&state.member)await openIssue(code);}catch(e){ctx.error(e);}});
 }
 $('closeModal').onclick=()=>closeModal();$('modal').addEventListener('cancel',e=>{e.preventDefault();closeModal();});
+$('pilotRole').onchange=async()=>{const selection=$('pilotRole').value;epoch++;seq++;closeModal();state.member=null;state.cases=[];state.seen={};$('list').replaceChildren();$('metrics').replaceChildren();$('workspace').hidden=true;state.page='mine';pilotRole=selection;try{await refresh();}catch(e){ctx.error(e);}};
 $('signOut').onclick=()=>{caseUrl(null);auth.signOut();};
 $('report').onclick=()=>{state.opened=null;caseUrl(null);reportForm(ctx);formOpen=true;};$('admin').onclick=()=>{closeModal();adminPage(ctx).catch(ctx.error);};
 $('notices').onclick=()=>{closeModal();const box=modal('Thông báo');display(box,inbox());};

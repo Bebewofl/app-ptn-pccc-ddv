@@ -3,6 +3,7 @@ const { initializeApp, getApps } = require('firebase-admin/app');
 const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
 const { getStorage } = require('firebase-admin/storage');
+const pilot=require('./pilot');
 const { need, ms, snapshot, stateView } = require('./domain');
 const demoProject = 'demo-hub-lite', testProject = 'hub-ptn-test';
 function resources() {
@@ -35,6 +36,7 @@ async function profile(db, id, tx) {
   return {...m,effectiveScopes};
 }
 async function active(db,id,tx) {
+  await pilot.verify(db,id,tx);
   const m = await profile(db,id,tx);
   need(m?.active,'Tài khoản chưa được kích hoạt hoặc đã tạm khóa.',403);
   return m;
@@ -49,7 +51,7 @@ function record(tx, ref, old, patch, id, m, requestId, extra = {}) {
   if (old) tx.update(ref,{...patch,rev:next.rev,lastEvent:requestId,updatedAt:next.updatedAt});
   else tx.create(ref,next);
   tx.create(ref.collection('events').doc(requestId), {
-    actor:snapshot(id,m), actorUid:id, rev:next.rev, action:next.lastAction,
+    actor:snapshot(id,m), actorUid:id, principalUid:pilot.auditPrincipal(id), rev:next.rev, action:next.lastAction,
     note:next.lastNote || '', basis:next.lastBasis || '', status:next.status, ownerUid:next.ownerUid,
     nextUid:next.nextUid, before:stateView(old), after:stateView(next), at:now(), ...extra
   });

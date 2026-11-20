@@ -11,7 +11,7 @@ if(!['save','verify'].includes(mode)||!file)throw Error('Expected save|verify an
 function canonical(o){if(o?.toMillis)return o.toMillis();if(Array.isArray(o))return o.map(canonical);if(o&&typeof o==='object')return Object.fromEntries(Object.keys(o).sort().map(k=>[k,canonical(o[k])]));return o;}
 const rows=[];
 async function walk(collection){for(const d of (await collection.get()).docs){rows.push([d.ref.path,canonical(d.data())]);for(const child of await d.ref.listCollections())await walk(child);}}
-for(const name of ['hub_v3_cases','hub_v3_members','hub_v3_access_events','hub_v3_directory'])await walk(db.collection(name));
+for(const name of ['hub_v3_cases','hub_v3_members','hub_v3_access_events','hub_v3_directory','hub_v3_pilot_access'])await walk(db.collection(name));
 const users=(await auth.listUsers(1000)).users.map(u=>[u.uid,u.disabled]).sort();
 const objects=[];for(const object of (await bucket.getFiles({prefix:'hub-v3/'}))[0]){const [bytes]=await object.download();objects.push([object.name,createHash('sha256').update(bytes).digest('hex')]);}
 if(!rows.length||!objects.length||!users.length)throw Error('Backup fixture is incomplete.');

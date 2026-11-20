@@ -47,7 +47,7 @@ export function actionForm(ctx,c,action){
   if(action==='decision_request'&&(c.flags?.paused||c.flags?.needResume)){purpose=check(f,'Xin quyết định cho phép tiếp tục hoạt động','resumePurpose');}
   if(['approve','reject','pause','resume'].includes(action))basis=field(f,'Căn cứ quyết định *','textarea','aBasis',{required:true,maxLength:1000});
   if(action==='decision_request'){scope=field(f,'Thẩm quyền cần xin ý kiến','select','scope');choices(scope,[...new Set([c.pauseScope,c.domain||'management','management'].filter(Boolean))].map(s=>[s,scopes[s]]));}
-  if(['route','assign','invite','decision_request'].includes(action)){
+  if(['route','assign','invite','decision_request','handover'].includes(action)){
     target=field(f,'Người nhận *','select','aTarget',{required:true});
     const update=()=>targetChoices(target,dir,member,c.severity,{assign:action==='assign',decision:scope?.value,exclude:action==='invite'?[c.ownerUid,...(c.collaborators||[])]:[]});
     update();if(scope)scope.onchange=update;

@@ -16,11 +16,21 @@ async function workspace(db,id) {
   return {member:{...m,uid:id}, directory:directory.docs.map(d=>({...d.data(),id:d.id})), cases:[...rows.values()],
     seen:Object.fromEntries(seen.docs.map(d=>[d.id,d.data().rev]))};
 }
+function needsReplacement(c,person){
+  if(!c.nextUid || c.status===states.closed)return false;
+  if(!person?.active)return true;
+  if(c.status===states.done)return !person.canClose;
+  if(c.status===states.decision)return !person.effectiveScopes?.includes(c.decisionScope);
+  return [states.new,states.work].includes(c.status)&&!person.canHandle;
+}
+function mayReplace(m,id,c){return (m.canCoordinate===true|| (c.reviewerUid===id && m.canClose))&&c.status!==states.closed;}
 async function detail(db,id,key) {
   const m=await active(db,id), c=await caseData(db,code(key)); visible(m,id,c);
   const ref=cases(db).doc(key);
   const [events,files]=await Promise.all([ref.collection('events').orderBy('rev').get(),ref.collection('files').get()]);
-  return {issue:summary(c,id,m), events:events.docs.map(d=>d.data()), files:files.docs.filter(d=>d.data().state==='ready'||d.data().uploader===id).map(d=>({...d.data(),id:d.id}))};
+  const row=summary(c,id,m);
+  if(mayReplace(m,id,c) && c.nextUid && needsReplacement(c,await profile(db,c.nextUid)))row.actions.push('handover');
+  return {issue:row, events:events.docs.map(d=>d.data()), files:files.docs.filter(d=>d.data().state==='ready'||d.data().uploader===id).map(d=>({...d.data(),id:d.id}))};
 }
 async function create(db,id,input) {
   need(!['reporterUid','sourceUnit','actorUid','readers','status'].some(k=>Object.hasOwn(input,k)),'Danh tính và trạng thái do hệ thống ghi nhận.',403);
@@ -65,7 +75,16 @@ async function act(db,id,input) {
     const people={};
     if(input.target){const who=uid(input.target);people[who]=await profile(db,who,tx);}
     if(input.action==='report_done')people[c.reviewerUid]=await profile(db,c.reviewerUid,tx);
-    const change=transition(c,m,id,input,people);
+    let change;
+    if(input.action==='handover'){
+      need(mayReplace(m,id,c)&&needsReplacement(c,await profile(db,c.nextUid,tx)),'Hồ sơ vẫn có đầu mối đủ quyền hoặc ngoài phạm vi điều phối.',403);
+      const target=uid(input.target), to=people[target];checkTarget(m,id,target,to,c.severity);
+      const note=text(input.note,4000,true);
+      change={actorUid:id,lastAction:'handover',lastNote:note,lastBasis:'',readers:unique([...c.readers,target,id]),nextUid:target};
+      if(c.status===states.done){need(to.canClose,'Người thay thế cần quyền xác nhận.',403);change.reviewerUid=target;}
+      else if(c.status===states.decision){need(to.effectiveScopes.includes(c.decisionScope),'Người thay thế thiếu quyền quyết định.',403);}
+      else if(c.status!==states.more){Object.assign(change,{ownerUid:target,ownerUnit:to.unit,ownerName:to.name,status:states.new});}
+    }else change=transition(c,m,id,input,people);
     const rev=record(tx,ref,c,change,id,m,key,input.target?{target:{uid:input.target,name:people[input.target]?.name||'',unit:people[input.target]?.unit||''}}:{});
     return {code:ref.id,rev};
   });

@@ -100,6 +100,12 @@ def main(play):
     a.locator("#editAccount").select_option("demo-ptn");expect(a.locator("#name")).to_have_value("Trưởng phòng Thử nghiệm")
     expect(a.locator("#modalBody")).to_contain_text("Lịch sử thay đổi quyền")
     passed("D09 · Giao diện quản trị theo vai trò")
+    operator=login(browser.new_context(),"operator")
+    expect(operator.locator("#identity")).to_contain_text("Thử nghiệm")
+    operator.locator("#pilotRole").select_option("demo-pkt")
+    expect(operator.locator("#identity")).to_contain_text("Kỹ thuật")
+    expect(operator.locator("#heading")).to_have_text("Việc cần tôi xử lý")
+    passed("D11 · Người nghiệm thu chuyển giữa hai vai được cấp")
     assert not err,err
     browser.close()
     if os.getenv("HUB_WEBKIT")=="1":

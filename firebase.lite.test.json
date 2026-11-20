@@ -38,5 +38,11 @@
     "source": "functions-lite",
     "codebase": "hub-lite",
     "runtime": "nodejs22"
-  }
+  },
+  "storage": [
+    {
+      "bucket": "hub-ptn-test-v3-lite",
+      "rules": "rules/storage.v3-service.rules"
+    }
+  ]
 }

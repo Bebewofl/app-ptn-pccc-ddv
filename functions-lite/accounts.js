@@ -1,5 +1,6 @@
 'use strict';
 const {need,text,uid,rid,scopes,unique,snapshot}=require('./domain');
+const {auditPrincipal}=require('./pilot');
 const {get,active,profile,members,now,Timestamp}=require('./data');
 function manages(m,unit){return m.manageAccounts===true && (m.manageUnits||[]).includes(unit);}
 function directory(m){return {name:m.name,title:m.title,unit:m.unit,active:m.active,canHandle:m.canHandle,unitLead:!!m.unitLead,scopes:m.scopes||[], delegation:m.delegation || null};}
@@ -41,9 +42,9 @@ async function save({db,auth},id,input){
       routes,emergencyRoutes,reviewerUid:reviewer,scopes:selected,delegation,rev:(old?.rev||0)+1,
       canReport:input.canReport===true,canHandle:input.canHandle===true,canClose:input.canClose===true,mayPause:input.mayPause===true,
       canDecide:selected.length>0||!!delegation,overview:old?.overview===true,unitLead:input.unitLead===true,
-      manageAccounts:false,technical:false};
+      manageAccounts:false,technical:false,canCoordinate:old?.canCoordinate===true};
     tx.set(ref,m);tx.set(db.collection('hub_v3_directory').doc(target),directory(m));
-    tx.create(event,{actor:snapshot(id,mgr),target,reason,before:old,after:m,at:now()});
+    tx.create(event,{actor:snapshot(id,mgr),principalUid:auditPrincipal(id),target,reason,before:old,after:m,at:now()});
     return {ok:true};
   });
 }
