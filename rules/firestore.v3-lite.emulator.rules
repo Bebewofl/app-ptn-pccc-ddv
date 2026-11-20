@@ -1,0 +1,103 @@
+rules_version = '2';
+service cloud.firestore {
+ match /databases/{database}/documents {
+  function uid(){return request.auth.uid;}
+  function member(id){return get(/databases/$(database)/documents/hub_v3_members/$(id)).data;}
+  function active(){return request.auth != null && member(uid()).active == true;}
+  function me(){return member(uid());}
+  function allowedTarget(id, severity){
+   return id is string && id != uid() && member(id).active == true &&
+    member(id).canHandle == true &&
+    (id in me().routes || (severity == 'Khẩn cấp' && id in me().emergencyRoutes));
+  }
+  function allowedDecision(id){
+   return allowedTarget(id,'Thông thường') && member(id).canDecide == true;
+  }
+  function readCase(d){return active() && (uid() in d.readers || me().overview == true);}
+  function validText(s,max){return s is string && s.size()>0 && s.size()<=max && s.matches('.*\\S.*');}
+  function optionalText(s,max){return s is string && s.size()<=max;}
+  function appendReader(old,id){return id in old ? old : old.concat([id]);}
+  function keys(d){
+   return d.keys().hasAll(['code','title','body','severity','reference','evidence','deadline','reporterUid','reporterName','reporterTitle','sourceUnit','sourceGroup','ownerUid','nextUid','reviewerUid','readers','status','rev','lastEvent','lastAction','lastNote','lastBasis','actorUid','createdAt','updatedAt']) &&
+   d.keys().hasOnly(['code','title','body','severity','reference','evidence','deadline','reporterUid','reporterName','reporterTitle','sourceUnit','sourceGroup','ownerUid','nextUid','reviewerUid','readers','status','rev','lastEvent','lastAction','lastNote','lastBasis','actorUid','createdAt','updatedAt']);
+  }
+  function eventMatches(e,d){
+   return e.keys().hasAll(['rev','action','note','basis','actorUid','status','ownerUid','nextUid','at']) &&
+    e.keys().hasOnly(['rev','action','note','basis','actorUid','status','ownerUid','nextUid','at']) &&
+    e.rev==d.rev && e.action==d.lastAction && e.note==d.lastNote && e.basis==d.lastBasis &&
+    e.actorUid==uid() && d.actorUid==uid() && e.status==d.status &&
+    e.ownerUid==d.ownerUid && e.nextUid==d.nextUid && e.at==request.time;
+  }
+  function requiresEvent(id,d){
+   let p=/databases/$(database)/documents/hub_v3_cases/$(id)/events/$(d.lastEvent);
+   return d.lastEvent is string && !exists(p) && eventMatches(getAfter(p).data,d);
+  }
+  function validCreate(id,d){
+   return active() && me().canReport==true && keys(d) &&
+    d.code==id && id.matches('VM3-[A-Za-z0-9]{16}') &&
+    validText(d.title,160) && validText(d.body,4000) &&
+    d.severity in ['Thông thường','Quan trọng','Khẩn cấp'] &&
+    optionalText(d.reference,160) && optionalText(d.evidence,1000) &&
+    (d.evidence=='' || d.evidence.matches('https://[^ ]+')) &&
+    (d.deadline==null || d.deadline is timestamp) &&
+    d.reporterUid==uid() && d.reporterName==me().name && d.reporterTitle==me().title &&
+    d.sourceUnit==me().unit && d.sourceGroup==me().group &&
+    allowedTarget(d.ownerUid,d.severity) && d.nextUid==d.ownerUid &&
+    d.reviewerUid==me().reviewerUid && member(d.reviewerUid).active==true &&
+    member(d.reviewerUid).canClose==true &&
+    d.readers==[uid(),d.ownerUid,d.reviewerUid] &&
+    d.status=='Chờ tiếp nhận' && d.rev==1 && d.lastAction=='create' &&
+    d.lastNote=='' && d.lastBasis=='' && d.createdAt==request.time && d.updatedAt==request.time &&
+    requiresEvent(id,d);
+  }
+  function sameOwner(a,b){return b.ownerUid==a.ownerUid && b.readers==a.readers;}
+  function isNext(a){return a.nextUid==uid();}
+  function ownerNext(a,b){return sameOwner(a,b) && b.nextUid==a.ownerUid;}
+  function transitions(a,b){
+   let s=a.status;
+   let k=b.lastAction;
+   return
+   (k=='accept' && s=='Chờ tiếp nhận' && isNext(a) && me().canHandle==true && ownerNext(a,b) && b.status=='Đang xử lý') ||
+   (k=='respond' && s=='Đang xử lý' && isNext(a) && me().canHandle==true && ownerNext(a,b) && b.status==s) ||
+   (k=='supplement' && s=='Đang xử lý' && isNext(a) && me().canHandle==true && sameOwner(a,b) && b.nextUid==a.reporterUid && b.status=='Chờ bổ sung') ||
+   (k=='supply' && s=='Chờ bổ sung' && isNext(a) && ownerNext(a,b) && b.status=='Đang xử lý') ||
+   (k=='route' && s=='Đang xử lý' && isNext(a) && me().canHandle==true && allowedTarget(b.ownerUid,a.severity) && b.nextUid==b.ownerUid && b.readers==appendReader(a.readers,b.ownerUid) && b.status=='Chờ tiếp nhận') ||
+   (k=='decision_request' && s=='Đang xử lý' && isNext(a) && me().canHandle==true && b.ownerUid==a.ownerUid && allowedDecision(b.nextUid) && b.readers==appendReader(a.readers,b.nextUid) && b.status=='Chờ quyết định') ||
+   (k in ['approve','reject'] && s=='Chờ quyết định' && isNext(a) && me().canDecide==true && ownerNext(a,b) && b.status=='Đang xử lý' && validText(b.lastBasis,1000)) ||
+   (k=='report_done' && s=='Đang xử lý' && isNext(a) && me().canHandle==true && sameOwner(a,b) && b.nextUid==a.reviewerUid && member(a.reviewerUid).active==true && member(a.reviewerUid).canClose==true && b.status=='Chờ xác nhận') ||
+   (k=='close' && s=='Chờ xác nhận' && isNext(a) && uid()==a.reviewerUid && me().canClose==true && sameOwner(a,b) && b.nextUid=='' && b.status=='Đã đóng') ||
+   (k=='continue' && s=='Chờ xác nhận' && isNext(a) && uid()==a.reviewerUid && me().canClose==true && ownerNext(a,b) && b.status=='Đang xử lý') ||
+   (k=='reopen' && s=='Đã đóng' && uid()==a.reviewerUid && me().canClose==true && ownerNext(a,b) && b.status=='Đang xử lý');
+  }
+  function validUpdate(id,a,b){
+   return active() && keys(b) && b.diff(a).affectedKeys().hasOnly(['ownerUid','nextUid','readers','status','rev','lastEvent','lastAction','lastNote','lastBasis','actorUid','updatedAt']) &&
+    b.rev==a.rev+1 && b.updatedAt==request.time &&
+    (b.lastAction=='accept' ? b.lastNote=='' : validText(b.lastNote,4000)) &&
+    optionalText(b.lastBasis,1000) && (b.lastAction in ['approve','reject'] || b.lastBasis=='') &&
+    transitions(a,b) && requiresEvent(id,b);
+  }
+  match /hub_v3_members/{id}{
+   allow get: if request.auth != null && id==uid();
+   allow list, write: if false;
+  }
+  match /hub_v3_directory/{id}{
+   allow read: if active();
+   allow write: if false;
+  }
+  match /hub_v3_cases/{id}{
+   allow read: if readCase(resource.data);
+   allow create: if validCreate(id,request.resource.data);
+   allow update: if validUpdate(id,resource.data,request.resource.data);
+   allow delete: if false;
+   match /events/{eid}{
+    function casePath(){return /databases/$(database)/documents/hub_v3_cases/$(id);}
+    allow read: if readCase(get(casePath()).data);
+    allow create: if active() && getAfter(casePath()).data.lastEvent==eid &&
+     (!exists(casePath()) || get(casePath()).data.lastEvent!=eid) &&
+     eventMatches(request.resource.data,getAfter(casePath()).data);
+    allow update, delete: if false;
+   }
+  }
+  match /{document=**}{allow read,write: if false;}
+ }
+}
