@@ -1,0 +1,24 @@
+name: HUB V3 Lite isolated checks
+on:
+  push:
+    branches: [hub-hfi-v3-lite]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: node --check src/lite/lite.js && node --check scripts/lite-demo.mjs && node scripts/build-lite.mjs
+      - run: node node_modules/firebase-tools/lib/bin/firebase.js emulators:exec --project demo-hub-lite --only firestore --config firebase.lite.emulator.json "node --test tests/lite/*.test.mjs"
+      - run: node node_modules/firebase-tools/lib/bin/firebase.js emulators:exec --project demo-hub-lite --only auth,firestore,hosting --config firebase.lite.emulator.json "HUB_LITE_SEED_ONLY=1 node scripts/lite-demo.mjs"
